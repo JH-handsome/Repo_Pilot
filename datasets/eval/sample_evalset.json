@@ -1,0 +1,17 @@
+[
+  {
+    "id": "case-1",
+    "query": "where is BM25 search implemented",
+    "relevant": ["coding_rag/bm25_retriever.py"]
+  },
+  {
+    "id": "case-2",
+    "query": "how context recall expands neighbor chunks",
+    "relevant": ["coding_rag/context_recaller.py"]
+  },
+  {
+    "id": "case-3",
+    "query": "where final recalled results are filtered",
+    "relevant": ["coding_rag/result_filter.py"]
+  }
+]
