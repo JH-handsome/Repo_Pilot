@@ -200,6 +200,23 @@ downloading a LeetCode solution repo, patch it with:
 python scripts/patch_leetcode_imports.py datasets/leetcode-python
 ```
 
+## Desktop Frontend Window
+
+If you already prepared prompts and want a visual window, run:
+
+```bash
+python web_ui.py
+```
+
+Then you can:
+
+- choose repo directory
+- input your prompt/query
+- adjust retrieval parameters (`top-k`, `chunk-size`, `overlap`, `recall-window`)
+- optionally enable LLM generation and pick mode/provider
+
+The output panel shows recalled code chunks and optional LLM response.
+
 ## Tests
 
 ```bash
