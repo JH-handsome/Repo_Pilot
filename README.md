@@ -217,6 +217,35 @@ Then you can:
 
 The output panel shows recalled code chunks and optional LLM response.
 
+
+## Retrieval Evaluation / Trace / Bad Case Analysis / Optimization
+
+Run retrieval evaluation:
+
+```bash
+python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --top-k 5
+```
+
+Save full trace (JSONL, one case per line):
+
+```bash
+python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --trace-out artifacts/retrieval_trace.jsonl
+```
+
+Run bad case attribution + parameter optimization:
+
+```bash
+python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --optimize
+```
+
+Evalset format:
+
+```json
+[
+  {"id": "case-1", "query": "...", "relevant": ["coding_rag/bm25_retriever.py"]}
+]
+```
+
 ## Tests
 
 ```bash
