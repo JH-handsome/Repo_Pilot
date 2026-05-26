@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -13,6 +14,7 @@ from coding_rag.context_recaller import expand_with_neighbor_chunks
 from coding_rag.file_loader import load_python_files
 from coding_rag.result_filter import filter_recalled_results
 from main import run_answer_generator
+from scripts.retrieval_eval import EvalCase, optimize, pipeline, serialize_result, mrr_and_recall_at_k, analyze_bad_case
 
 
 class RepoPilotUI:
@@ -33,6 +35,8 @@ class RepoPilotUI:
         self.mode_var = tk.StringVar(value="judge")
         self.provider_var = tk.StringVar(value="deepseek")
         self.status_var = tk.StringVar(value="就绪")
+        self.evalset_path_var = tk.StringVar(value="datasets/eval/sample_evalset.json")
+        self.last_trace_path: Path | None = None
 
         self._build_layout()
 
@@ -81,7 +85,17 @@ class RepoPilotUI:
         run_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
         run_bar.pack(fill=tk.X)
         ttk.Button(run_bar, text="开始检索", command=self._run_async).pack(side=tk.LEFT)
+        ttk.Button(run_bar, text="开始评测", command=self._run_eval_async).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(run_bar, text="导出 Trace", command=self._export_last_trace).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(run_bar, text="Bad Case 面板", command=self._show_bad_cases).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(run_bar, text="自动调参", command=self._optimize_async).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Label(run_bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=(12, 0))
+
+        eval_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
+        eval_bar.pack(fill=tk.X)
+        ttk.Label(eval_bar, text="评测集").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(eval_bar, textvariable=self.evalset_path_var, width=72).grid(row=0, column=1, padx=8)
+        ttk.Button(eval_bar, text="选择评测集", command=self._pick_evalset).grid(row=0, column=2)
 
         output_frame = ttk.Frame(self.root, padding=10)
         output_frame.pack(fill=tk.BOTH, expand=True)
@@ -159,6 +173,83 @@ class RepoPilotUI:
         except Exception as exc:
             self._set_output(f"执行失败: {exc}")
             self._set_status("失败")
+
+
+    def _pick_evalset(self) -> None:
+        selected = filedialog.askopenfilename(title="选择评测集 JSON", filetypes=[("JSON", "*.json")])
+        if selected:
+            self.evalset_path_var.set(selected)
+
+    def _run_eval_async(self) -> None:
+        threading.Thread(target=self._run_eval, daemon=True).start()
+
+    def _run_eval(self) -> None:
+        self._set_status("评测中...")
+        try:
+            evalset = json.loads(Path(self.evalset_path_var.get()).read_text(encoding="utf-8"))
+            cases = [EvalCase(id=i["id"], query=i["query"], relevant=i["relevant"]) for i in evalset]
+            out_rows = []
+            for case in cases:
+                seed, recalled, final = pipeline(self.repo_path_var.get().strip(), case.query, self.top_k_var.get(), self.chunk_size_var.get(), self.overlap_var.get(), self.recall_window_var.get())
+                rr, rec, hits = mrr_and_recall_at_k(final, case.relevant, self.top_k_var.get())
+                bad = analyze_bad_case(seed, recalled, final, case.relevant, self.top_k_var.get())
+                out_rows.append({"id": case.id, "query": case.query, "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits}, "bad_case": bad, "seed": [serialize_result(x) for x in seed], "recalled": [serialize_result(x) for x in recalled], "final": [serialize_result(x) for x in final]})
+
+            trace_path = Path("artifacts") / "ui_retrieval_trace.jsonl"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            trace_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in out_rows), encoding="utf-8")
+            self.last_trace_path = trace_path
+            bad_cnt = sum(1 for r in out_rows if not r["bad_case"]["final_hit"])
+            self._set_output(f"评测完成: {len(out_rows)} cases\nBad cases: {bad_cnt}\nTrace: {trace_path}")
+            self._set_status("评测完成")
+        except Exception as exc:
+            self._set_output(f"评测失败: {exc}")
+            self._set_status("评测失败")
+
+    def _export_last_trace(self) -> None:
+        if not self.last_trace_path or not self.last_trace_path.exists():
+            messagebox.showwarning("无 Trace", "请先点击“开始评测”生成 Trace。")
+            return
+        target = filedialog.asksaveasfilename(title="保存 Trace", defaultextension=".jsonl", filetypes=[("JSONL", "*.jsonl")])
+        if not target:
+            return
+        Path(target).write_text(self.last_trace_path.read_text(encoding="utf-8"), encoding="utf-8")
+        self._set_status("Trace 已导出")
+
+    def _show_bad_cases(self) -> None:
+        if not self.last_trace_path or not self.last_trace_path.exists():
+            messagebox.showwarning("无数据", "请先点击“开始评测”。")
+            return
+        rows = [json.loads(line) for line in self.last_trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        bad = [r for r in rows if not r["bad_case"]["final_hit"]]
+        if not bad:
+            self._set_output("没有 bad case。")
+            return
+        blocks = []
+        for r in bad:
+            blocks.append(f"[{r['id']}] {r['query']}\n- reasons: {', '.join(r['bad_case']['reasons'])}\n- prompt_hints: {'; '.join(r['bad_case']['prompt_hints'])}")
+        self._set_output("\n\n".join(blocks))
+        self._set_status("Bad Case 展示完成")
+
+    def _optimize_async(self) -> None:
+        threading.Thread(target=self._run_optimize, daemon=True).start()
+
+    def _run_optimize(self) -> None:
+        self._set_status("调参中...")
+        try:
+            evalset = json.loads(Path(self.evalset_path_var.get()).read_text(encoding="utf-8"))
+            cases = [EvalCase(id=i["id"], query=i["query"], relevant=i["relevant"]) for i in evalset]
+            class Args: pass
+            args = Args()
+            args.repo_path = self.repo_path_var.get().strip()
+            args.top_k = self.top_k_var.get()
+            # optimize prints to stdout; give user guidance in UI
+            optimize(args, cases)
+            self._set_output("自动调参已执行（结果已输出到终端日志）。")
+            self._set_status("调参完成")
+        except Exception as exc:
+            self._set_output(f"调参失败: {exc}")
+            self._set_status("调参失败")
 
     @staticmethod
     def _render_results(results: list[SearchResult]) -> str:
