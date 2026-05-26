@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+llm_env/
+.env
+.vscode/
+
+repo_pilot/
+datasets/leetcode-python/
