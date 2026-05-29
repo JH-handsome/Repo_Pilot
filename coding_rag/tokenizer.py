@@ -32,16 +32,6 @@ class CodeTokenizer:
         chinese_ngram_min: 中文 n-gram 的最小长度
         chinese_ngram_max: 中文 n-gram 的最大长度
     """
-    """Tokenizer for simple code search.
-
-    It is intentionally small and dependency-free:
-
-    - keeps full identifiers, such as `build_binary_tree`
-    - splits snake_case into `build`, `binary`, `tree`
-    - splits camelCase/PascalCase into smaller words
-    - keeps numbers
-    - expands Chinese text into short n-grams for queries like `二叉树`
-    """
 
     keep_full_identifier: bool = True
     chinese_ngram_min: int = 1

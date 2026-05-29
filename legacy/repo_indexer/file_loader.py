@@ -1,3 +1,9 @@
+"""早期文件加载原型。
+
+当前主流程已经迁移到 `coding_rag.file_loader`。这个文件仅保留作学习和对照，
+不要再作为新功能入口。
+"""
+
 from pathlib import Path
 
 

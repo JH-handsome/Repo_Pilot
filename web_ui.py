@@ -11,10 +11,24 @@ from tkinter import filedialog, messagebox, ttk
 from coding_rag.bm25_retriever import BM25Retriever, SearchResult
 from coding_rag.code_splitter import split_python_files
 from coding_rag.context_recaller import expand_with_neighbor_chunks
+from coding_rag.env_loader import ensure_dotenv, load_dotenv
 from coding_rag.file_loader import load_python_files
 from coding_rag.result_filter import filter_recalled_results
 from main import run_answer_generator
-from scripts.retrieval_eval import EvalCase, optimize, pipeline, serialize_result, mrr_and_recall_at_k, analyze_bad_case
+from scripts.retrieval_eval import (
+    analyze_bad_case,
+    build_eval_generator,
+    build_stage_file_record,
+    default_recall_max_results,
+    generate_eval_answer,
+    load_evalset,
+    mrr_and_recall_at_k,
+    optimize,
+    pipeline,
+    serialize_result,
+    stage_files_path_for_trace,
+    write_jsonl,
+)
 
 
 class RepoPilotUI:
@@ -25,18 +39,19 @@ class RepoPilotUI:
         self.root.title("RepoPilot Prompt UI")
         self.root.geometry("1100x760")
 
-        self.repo_path_var = tk.StringVar(value="datasets")
+        self.repo_path_var = tk.StringVar(value=".")
         self.query_var = tk.StringVar()
         self.top_k_var = tk.IntVar(value=5)
         self.chunk_size_var = tk.IntVar(value=40)
         self.overlap_var = tk.IntVar(value=5)
-        self.recall_window_var = tk.IntVar(value=1)
+        self.recall_window_var = tk.IntVar(value=2)
         self.use_llm_var = tk.BooleanVar(value=False)
         self.mode_var = tk.StringVar(value="judge")
         self.provider_var = tk.StringVar(value="deepseek")
         self.status_var = tk.StringVar(value="就绪")
         self.evalset_path_var = tk.StringVar(value="datasets/eval/sample_evalset.json")
         self.last_trace_path: Path | None = None
+        self.last_stage_files_path: Path | None = None
 
         self._build_layout()
 
@@ -73,7 +88,7 @@ class RepoPilotUI:
             state="readonly",
             width=18,
         ).grid(row=0, column=2)
-        ttk.Label(llm_bar, text="Provider").grid(row=0, column=3, padx=(10, 3))
+        ttk.Label(llm_bar, text="提供商").grid(row=0, column=3, padx=(10, 3))
         ttk.Combobox(
             llm_bar,
             textvariable=self.provider_var,
@@ -142,7 +157,7 @@ class RepoPilotUI:
                 chunks=chunks,
                 seed_results=seed,
                 window=self.recall_window_var.get(),
-                max_results=20,
+                max_results=default_recall_max_results(self.top_k_var.get(), self.recall_window_var.get()),
             )
             results = filter_recalled_results(query, recalled, retriever, final_k=self.top_k_var.get())
 
@@ -153,6 +168,8 @@ class RepoPilotUI:
             ]
 
             if self.use_llm_var.get():
+                ensure_dotenv()
+                load_dotenv()
                 args = type("Args", (), {
                     "query": query,
                     "mode": self.mode_var.get(),
@@ -176,7 +193,10 @@ class RepoPilotUI:
 
 
     def _pick_evalset(self) -> None:
-        selected = filedialog.askopenfilename(title="选择评测集 JSON", filetypes=[("JSON", "*.json")])
+        selected = filedialog.askopenfilename(
+            title="选择评测集",
+            filetypes=[("评测集", "*.json *.jsonl"), ("JSON", "*.json"), ("JSONL", "*.jsonl")],
+        )
         if selected:
             self.evalset_path_var.set(selected)
 
@@ -186,21 +206,41 @@ class RepoPilotUI:
     def _run_eval(self) -> None:
         self._set_status("评测中...")
         try:
-            evalset = json.loads(Path(self.evalset_path_var.get()).read_text(encoding="utf-8"))
-            cases = [EvalCase(id=i["id"], query=i["query"], relevant=i["relevant"]) for i in evalset]
+            cases = load_evalset(self.evalset_path_var.get())
             out_rows = []
+            stage_file_rows = []
+            path_roots = [
+                Path(self.repo_path_var.get().strip()).resolve(),
+                Path(self.evalset_path_var.get()).resolve().parent,
+            ]
+            generator = None
+            llm_setup_error = None
+            if self.use_llm_var.get():
+                ensure_dotenv()
+                load_dotenv()
+                try:
+                    generator = build_eval_generator(self._build_llm_args())
+                except ValueError as error:
+                    llm_setup_error = f"LLM 配置错误: {error}"
+
             for case in cases:
                 seed, recalled, final = pipeline(self.repo_path_var.get().strip(), case.query, self.top_k_var.get(), self.chunk_size_var.get(), self.overlap_var.get(), self.recall_window_var.get())
-                rr, rec, hits = mrr_and_recall_at_k(final, case.relevant, self.top_k_var.get())
-                bad = analyze_bad_case(seed, recalled, final, case.relevant, self.top_k_var.get())
-                out_rows.append({"id": case.id, "query": case.query, "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits}, "bad_case": bad, "seed": [serialize_result(x) for x in seed], "recalled": [serialize_result(x) for x in recalled], "final": [serialize_result(x) for x in final]})
+                rr, rec, hits = mrr_and_recall_at_k(final, case.relevant, self.top_k_var.get(), path_roots)
+                bad = analyze_bad_case(seed, recalled, final, case.relevant, self.top_k_var.get(), path_roots)
+                row = {"id": case.id, "query": case.query, "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits}, "bad_case": bad, "seed": [serialize_result(x) for x in seed], "recalled": [serialize_result(x) for x in recalled], "final": [serialize_result(x) for x in final]}
+                if self.use_llm_var.get():
+                    row["llm"] = generate_eval_answer(generator, llm_setup_error, case.query, final)
+                out_rows.append(row)
+                stage_file_rows.append(build_stage_file_record(case, seed, recalled, final, self.top_k_var.get(), path_roots))
 
             trace_path = Path("artifacts") / "ui_retrieval_trace.jsonl"
-            trace_path.parent.mkdir(parents=True, exist_ok=True)
-            trace_path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in out_rows), encoding="utf-8")
+            stage_files_path = stage_files_path_for_trace(trace_path)
+            write_jsonl(trace_path, out_rows)
+            write_jsonl(stage_files_path, stage_file_rows)
             self.last_trace_path = trace_path
+            self.last_stage_files_path = stage_files_path
             bad_cnt = sum(1 for r in out_rows if not r["bad_case"]["final_hit"])
-            self._set_output(f"评测完成: {len(out_rows)} cases\nBad cases: {bad_cnt}\nTrace: {trace_path}")
+            self._set_output(self._render_eval_output(out_rows, bad_cnt, trace_path, stage_files_path))
             self._set_status("评测完成")
         except Exception as exc:
             self._set_output(f"评测失败: {exc}")
@@ -237,8 +277,7 @@ class RepoPilotUI:
     def _run_optimize(self) -> None:
         self._set_status("调参中...")
         try:
-            evalset = json.loads(Path(self.evalset_path_var.get()).read_text(encoding="utf-8"))
-            cases = [EvalCase(id=i["id"], query=i["query"], relevant=i["relevant"]) for i in evalset]
+            cases = load_evalset(self.evalset_path_var.get())
             class Args: pass
             args = Args()
             args.repo_path = self.repo_path_var.get().strip()
@@ -251,6 +290,54 @@ class RepoPilotUI:
             self._set_output(f"调参失败: {exc}")
             self._set_status("调参失败")
 
+    def _build_llm_args(self):
+        return type("Args", (), {
+            "mode": self.mode_var.get(),
+            "llm_provider": self.provider_var.get(),
+            "llm_model": None,
+            "llm_base_url": None,
+            "llm_api_key_env": None,
+            "llm_timeout": 60,
+            "llm_max_tokens": 1200,
+            "llm_temperature": None,
+            "llm_context_chars": 12000,
+        })
+
+    @staticmethod
+    def _render_eval_output(
+        rows: list[dict],
+        bad_count: int,
+        trace_path: Path,
+        stage_files_path: Path | None = None,
+    ) -> str:
+        lines = [
+            f"评测完成: {len(rows)} cases",
+            f"Bad cases: {bad_count}",
+            f"Trace: {trace_path}",
+        ]
+        if stage_files_path:
+            lines.append(f"Stage files: {stage_files_path}")
+        for row in rows:
+            metrics = row["metrics"]
+            lines.extend([
+                "",
+                "=" * 80,
+                f"[{row['id']}] {row['query']}",
+                f"MRR: {metrics['rr']:.4f} | Recall@K: {metrics['recall_at_k']:.4f} | Hits: {metrics['hit_count']}",
+            ])
+
+            llm = row.get("llm")
+            if not llm:
+                continue
+
+            lines.extend(["", "LLM 输出:", "-" * 80])
+            if llm.get("error"):
+                lines.append(f"LLM 调用失败: {llm['error']}")
+            else:
+                lines.append((llm.get("answer") or "").strip() or "LLM 输出为空。")
+
+        return "\n".join(lines)
+
     @staticmethod
     def _render_results(results: list[SearchResult]) -> str:
         blocks: list[str] = []
@@ -260,7 +347,7 @@ class RepoPilotUI:
                 [
                     "=" * 80,
                     f"结果 {index} | 分数: {result.score:.4f}",
-                    f"Source: {result.source}",
+                    f"来源标签: {result.source}",
                     f"来源: {chunk.file_path}:{chunk.start_line}-{chunk.end_line}",
                     "-" * 80,
                     chunk.text.rstrip(),

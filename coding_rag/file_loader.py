@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+IGNORED_DIRS = {".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache"}
+IGNORED_ROOT_DIRS = {"legacy"}
+
+
 @dataclass(frozen=True)
 class PythonFile:
     """表示一个 Python 文件的不可变数据类"""
@@ -37,7 +41,7 @@ def load_python_files(repo_path: str | Path) -> list[PythonFile]:
     python_files: list[PythonFile] = []
     # 递归查找所有 .py 文件并按路径排序
     for path in sorted(root.rglob("*.py")):
-        if should_skip(path):
+        if should_skip(path, root):
             continue
 
         # 以 UTF-8 编码读取文件内容，忽略编码错误
@@ -47,7 +51,7 @@ def load_python_files(repo_path: str | Path) -> list[PythonFile]:
     return python_files
 
 
-def should_skip(path: Path) -> bool:
+def should_skip(path: Path, root: Path | None = None) -> bool:
     """
     检查是否应该跳过某个路径
     
@@ -60,5 +64,15 @@ def should_skip(path: Path) -> bool:
         如果路径包含被忽略的目录，则返回 True
     """
     # 常见的需要忽略的目录名称
-    ignored_dirs = {".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache"}
-    return any(part in ignored_dirs for part in path.parts)
+    if any(part in IGNORED_DIRS for part in path.parts):
+        return True
+
+    if root is not None:
+        try:
+            relative_parts = path.resolve().relative_to(root.resolve()).parts
+        except ValueError:
+            relative_parts = ()
+        if relative_parts and relative_parts[0] in IGNORED_ROOT_DIRS:
+            return True
+
+    return False

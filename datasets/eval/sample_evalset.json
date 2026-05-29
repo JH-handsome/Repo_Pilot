@@ -1,17 +1,17 @@
 [
   {
     "id": "case-1",
-    "query": "where is BM25 search implemented",
+    "query": "BM25Retriever.search 是如何对 query 分词，并用 BM25Okapi 给代码块排序的？",
     "relevant": ["coding_rag/bm25_retriever.py"]
   },
   {
     "id": "case-2",
-    "query": "how context recall expands neighbor chunks",
+    "query": "expand_with_neighbor_chunks 是如何按文件分组，并用 window 召回相邻代码块的？",
     "relevant": ["coding_rag/context_recaller.py"]
   },
   {
     "id": "case-3",
-    "query": "where final recalled results are filtered",
+    "query": "filter_recalled_results 是如何结合 source_priority、min_score 和 sort_key 选择最终结果的？",
     "relevant": ["coding_rag/result_filter.py"]
   }
 ]

@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 PRELUDE = "from leetcode_types import *\n"
+# 这些名字通常由 LeetCode 判题环境隐式提供，本地运行时需要补充导入。
 NEEDS_PRELUDE = re.compile(
     r"\b("
     r"ListNode|TreeNode|Node|Optional|List|Dict|Set|Tuple|Deque|"
@@ -17,9 +18,9 @@ NEEDS_PRELUDE = re.compile(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Patch copied LeetCode solutions so they can run locally."
+        description="给下载的 LeetCode Python 代码补充本地运行所需的类型导入。"
     )
-    parser.add_argument("repo_path", help="Path to the downloaded LeetCode repo")
+    parser.add_argument("repo_path", help="下载到本地的 LeetCode 仓库路径")
     return parser.parse_args()
 
 
@@ -28,13 +29,13 @@ def main() -> None:
     repo_path = Path(args.repo_path).resolve()
 
     if not repo_path.exists():
-        raise FileNotFoundError(f"Repo path does not exist: {repo_path}")
+        raise FileNotFoundError(f"仓库路径不存在: {repo_path}")
     if not repo_path.is_dir():
-        raise NotADirectoryError(f"Repo path is not a directory: {repo_path}")
+        raise NotADirectoryError(f"仓库路径不是目录: {repo_path}")
 
     shim_source = Path(__file__).resolve().parents[1] / "leetcode_types.py"
     if not shim_source.exists():
-        raise FileNotFoundError(f"Cannot find shim file: {shim_source}")
+        raise FileNotFoundError(f"找不到类型补丁文件: {shim_source}")
 
     patched_files = []
     shim_dirs = set()
@@ -61,8 +62,8 @@ def main() -> None:
     for directory in sorted(shim_dirs):
         shutil.copy2(shim_source, directory / "leetcode_types.py")
 
-    print(f"Patched {len(patched_files)} Python files.")
-    print(f"Copied leetcode_types.py into {len(shim_dirs)} directories.")
+    print(f"已补丁 {len(patched_files)} 个 Python 文件。")
+    print(f"已复制 leetcode_types.py 到 {len(shim_dirs)} 个目录。")
 
 
 def should_skip(path: Path) -> bool:

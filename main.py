@@ -9,6 +9,7 @@ import sys
 from coding_rag.bm25_retriever import BM25Retriever, SearchResult
 from coding_rag.code_splitter import split_python_files
 from coding_rag.context_recaller import expand_with_neighbor_chunks
+from coding_rag.env_loader import ensure_dotenv, load_dotenv
 from coding_rag.file_loader import load_python_files
 from coding_rag.llm_client import (
     OpenAICompatibleChatClient,
@@ -39,13 +40,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recall-window",
         type=int,
-        default=1,
+        default=2,
         help="每个 BM25 种子结果两侧召回的相邻代码块数量，设为 0 则禁用",
     )
     parser.add_argument(
         "--max-recall-results",
         type=int,
-        default=20,
         help="召回扩展后的最大代码块数量，设为 0 则不限制",
     )
     parser.add_argument(
@@ -104,6 +104,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     """主函数：执行代码搜索和可选的 LLM 生成"""
     args = parse_args()
+    if args.llm:
+        ensure_dotenv()
+        load_dotenv()
 
     python_files = load_python_files(args.repo_path)
     chunks = split_python_files(
@@ -118,18 +121,24 @@ def main() -> int:
 
     retriever = BM25Retriever(chunks)
     if args.show_tokens:
-        print("Query tokens:")
+        print("查询分词结果:")
         print(retriever.tokenizer.tokenize(args.query))
         print()
 
     # 如果未指定候选数量，使用 top-k 的值
     candidate_k = args.candidate_k or args.top_k
+    candidate_k = args.candidate_k or args.top_k
     seed_results = retriever.search(args.query, top_k=candidate_k)
+    max_recall_results = args.max_recall_results
+    if max_recall_results is None:
+        max_recall_results = max(20, candidate_k * ((2 * max(args.recall_window, 0)) + 1))
+    elif max_recall_results <= 0:
+        max_recall_results = None
     recalled_results = expand_with_neighbor_chunks(
         chunks=chunks,
         seed_results=seed_results,
         window=args.recall_window,
-        max_results=args.max_recall_results or None,
+        max_results=max_recall_results,
     )
     results = recalled_results  # 初始结果为召回的结果
 
@@ -158,7 +167,7 @@ def main() -> int:
         print()
         print("=" * 80)
         if args.legacy_judge:
-            print("LLM judgment (legacy mode)")
+            print("LLM 判断（旧版模式）")
         else:
             print(f"LLM 生成（模式: {args.mode}）")
         print("-" * 80)
@@ -218,9 +227,9 @@ def run_answer_generator(args: argparse.Namespace, results: list[SearchResult]) 
         mode=mode,
         max_context_chars=args.llm_context_chars,
     )
-    print(f"Provider: {generator.client.config.provider}")
-    print(f"Model: {generator.client.config.model}")
-    print(f"API key env: {generator.client.config.api_key_env}")
+    print(f"提供商: {generator.client.config.provider}")
+    print(f"模型: {generator.client.config.model}")
+    print(f"API 密钥环境变量: {generator.client.config.api_key_env}")
     print(f"生成模式: {mode.value}")
     print()
 
@@ -234,7 +243,7 @@ def print_search_results(results: list[SearchResult]) -> None:
         chunk = result.chunk  # 获取代码块信息
         print("=" * 80)
         print(f"结果 {index} | 分数: {result.score:.4f}")
-        print(f"Source: {result.source}")
+        print(f"来源标签: {result.source}")
         print(f"来源: {chunk.file_path}:{chunk.start_line}-{chunk.end_line}")
         print("-" * 80)
         print(chunk.text.rstrip())

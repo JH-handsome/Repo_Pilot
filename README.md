@@ -1,254 +1,182 @@
-# Coding RAG Minimal Skeleton
+# RepoPilot：轻量级代码 RAG 检索工具
 
-A tiny Coding RAG retrieval project for learning.
+RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一个 Python 仓库，把代码切成带行号的片段，用 BM25 找出和问题最相关的代码块，并可选调用大模型生成回答。
 
-Included modules:
+## 项目结构
 
-- `file_loader`: recursively reads Python files
-- `code_splitter`: splits code by line ranges
-- `tokenizer`: code-aware tokenizer for BM25
-- `bm25_retriever`: retrieves code chunks with `rank-bm25`
-- `llm_client`: tiny OpenAI-compatible chat-completions client
-- `llm_judge`: optional LLM judgment over BM25 results
-- `rag/prompt`: prompt templates for various generation modes
-- `rag/answer_generator`: answer generation with multiple modes
-- `main.py`: command-line entrypoint
+```text
+.
+├── coding_rag/              # 核心检索流程：加载、切片、分词、BM25、召回、过滤、LLM 客户端
+├── rag/                     # 面向大模型的提示词模板和答案生成器
+├── scripts/                 # 离线脚本：检索评测、LeetCode 兼容补丁、数据下载
+├── datasets/
+│   ├── eval/                # 评测集，支持 JSON 数组和 JSONL trace 两种格式
+│   └── leetcode_reference/  # LeetCode 本地类型参考
+├── artifacts/               # 运行后生成的 trace、评测结果等临时产物
+├── legacy/                  # 早期原型代码，仅保留作参考
+├── tests/                   # 单元测试
+├── main.py                  # 命令行入口
+├── web_ui.py                # Tkinter 桌面界面
+└── leetcode_types.py        # 本地运行 LeetCode 代码时的类型补丁
+```
 
-Not included: agents, vector databases, or WebUI.
+阅读代码时，优先从 `main.py` 和 `coding_rag/` 开始。`legacy/` 只是旧版本原型，不参与当前主流程。
 
-## Install
+## 安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## BM25 Search And Recall
+## 命令行检索
+
+基本用法：
 
 ```bash
-python main.py /path/to/your/repo "your query" --top-k 5
+python main.py /path/to/repo "你的问题" --top-k 5
 ```
 
-Example:
+示例：
 
 ```bash
-python main.py datasets "two sum hash map" --top-k 3
+python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
 ```
 
-The default retrieval flow is:
+默认检索流程：
 
-1. BM25 gets `--top-k` seed chunks.
-2. Recall expands each seed with nearby chunks from the same file.
-3. Final filtering re-scores recalled chunks and keeps the best `--final-k`.
-4. The CLI prints the final context, and the optional LLM judges that context.
+1. `file_loader` 递归读取 Python 文件，并跳过 `.git`、虚拟环境、缓存目录。
+2. `code_splitter` 按行号把文件切成 `CodeChunk`。
+3. `BM25Retriever` 建立 BM25 索引并检索种子代码块。
+4. `context_recaller` 召回同文件相邻代码块，补足上下文。
+5. `result_filter` 重新评分并保留最终上下文。
+6. CLI 打印代码块；如果开启 `--llm`，再把上下文交给大模型回答。
 
-Control the second recall stage:
+常用参数：
 
 ```bash
-python main.py datasets "two sum hash map" --top-k 5 --recall-window 1
-python main.py datasets "two sum hash map" --top-k 5 --recall-window 0
+python main.py . "代码在哪里切成 chunk？" --top-k 5 --recall-window 2
+python main.py . "代码在哪里切成 chunk？" --candidate-k 20 --max-recall-results 30
+python main.py . "代码在哪里切成 chunk？" --final-k 5 --min-final-score 1
+python main.py . "代码在哪里切成 chunk？" --show-tokens
 ```
 
-For a wider first pass before recall:
+分词器会同时照顾代码标识符和中文查询：
 
-```bash
-python main.py datasets "linked list cycle" --candidate-k 20 --recall-window 1 --max-recall-results 30
+- `build_binary_tree` 会保留完整词，并拆成 `build`、`binary`、`tree`
+- `twoSum` 会拆成 `twosum`、`two`、`sum`
+- 中文查询会展开成短 n-gram，方便匹配中文注释和问题
+
+## 大模型回答
+
+开启 `--llm` 后，系统会把检索结果整理成 prompt，并调用 OpenAI 兼容的 `/chat/completions` 接口。第一次运行时会自动创建 `.env` 模板。
+
+DeepSeek 示例配置：
+
+```dotenv
+DEEPSEEK_API_KEY=your_key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_API_KEY_ENV=DEEPSEEK_API_KEY
 ```
 
-Control the final post-recall filter:
+支持的预设：
 
-```bash
-python main.py datasets "binary tree TreeNode" --candidate-k 20 --recall-window 1 --final-k 5
-python main.py datasets "binary tree TreeNode" --candidate-k 20 --recall-window 1 --no-final-filter
-```
-
-Debug tokenizer output:
-
-```bash
-python main.py datasets "binary tree TreeNode level order" --top-k 5 --show-tokens
-```
-
-For code search, the tokenizer keeps full identifiers and also splits common
-code names:
-
-- `build_binary_tree` -> `build_binary_tree`, `build`, `binary`, `tree`
-- `twoSum` -> `twosum`, `two`, `sum`
-- Chinese queries are expanded into short n-grams
-
-## LLM-Powered Answer Generation
-
-BM25 returns candidate code chunks. The optional LLM step can generate answers
-in multiple modes based on your needs.
-
-### Generation Modes
-
-| Mode | Description | Use Case |
-| --- | --- | --- |
-| `judge` | Judge relevance and answer questions | Search and understand code |
-| `code-understand` | Explain code in depth | Learn how code works |
-| `code-generate` | Generate code based on examples | Create new implementations |
-| `leetcode` | Solve LeetCode problems | Algorithm problem solving |
-| `api` | Generate API usage examples | Learn how to use APIs |
-
-### Usage Examples
-
-**Search and judge (default mode):**
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "two sum hash map" --top-k 5 --llm --llm-provider deepseek
-```
-
-**Code understanding:**
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "binary tree level order traversal" --top-k 5 --llm --mode code-understand
-```
-
-**Code generation:**
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "implement depth first search" --top-k 5 --llm --mode code-generate
-```
-
-**LeetCode problem solving:**
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "two sum" --top-k 5 --llm --mode leetcode
-```
-
-**API usage examples:**
-
-```powershell
-$env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "how to use BM25 retriever" --top-k 5 --llm --mode api
-```
-
-### Legacy Mode
-
-To use the old LLM judge behavior for backward compatibility:
-
-```powershell
-python main.py datasets "your query" --top-k 5 --llm --legacy-judge
-```
-
-### LLM Configuration
-
-The client uses OpenAI-compatible `/chat/completions` HTTP APIs and does not add
-extra dependencies.
-
-Domestic provider presets:
-
-| Provider | Default model | API key env |
+| 服务商 | 默认模型 | API Key 环境变量 |
 | --- | --- | --- |
 | `deepseek` | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
 | `qwen` | `qwen-plus` | `DASHSCOPE_API_KEY` |
 | `kimi` | `kimi-k2.6` | `MOONSHOT_API_KEY` |
 | `zhipu` | `glm-4.7` | `ZHIPU_API_KEY` |
 
-PowerShell examples:
+生成模式：
+
+| 模式 | 作用 |
+| --- | --- |
+| `judge` | 判断检索结果相关性并回答问题 |
+| `code-understand` | 深入解释代码实现 |
+| `code-generate` | 基于参考代码生成实现 |
+| `leetcode` | 生成 LeetCode 风格解法 |
+| `api` | 生成 API 使用示例 |
+
+示例：
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your_key"
-python main.py datasets "two sum hash map" --top-k 5 --llm --llm-provider deepseek
+python main.py . "BM25 检索模块整体做了什么？" --top-k 5 --llm --llm-provider deepseek
+python main.py . "解释代码切片逻辑" --llm --mode code-understand
+python main.py . "生成一个使用 BM25Retriever 的示例" --llm --mode api
 ```
 
-```powershell
-$env:DASHSCOPE_API_KEY="your_key"
-python main.py datasets "binary tree level order traversal" --top-k 5 --llm --llm-provider qwen
-```
-
-Custom OpenAI-compatible endpoint:
+自定义 OpenAI 兼容接口：
 
 ```powershell
 $env:LLM_API_KEY="your_key"
 $env:LLM_BASE_URL="http://localhost:11434/v1"
 $env:LLM_MODEL="your-model"
-python main.py datasets "linked list cycle" --llm --llm-provider custom
+python main.py . "linked list cycle" --llm --llm-provider custom
 ```
 
-You can override preset values:
+## 桌面界面
 
-```powershell
-python main.py datasets "trie prefix search" --llm --llm-provider kimi --llm-model moonshot-v1-8k
-```
-
-**Control output length:**
-
-```powershell
-python main.py datasets "binary tree" --llm --llm-max-tokens 4000
-```
-
-**Adjust context size:**
-
-```powershell
-python main.py datasets "complex algorithm" --llm --llm-context-chars 20000
-```
-
-### Available LLM Providers
-
-LeetCode defines `ListNode`, `TreeNode`, and several different `Node` shapes in
-its judge environment. Local copied solutions may fail unless those names are
-provided.
-
-This project includes `leetcode_types.py` as a small local shim. After
-downloading a LeetCode solution repo, patch it with:
-
-```bash
-python scripts/patch_leetcode_imports.py datasets/leetcode-python
-```
-
-## Desktop Frontend Window
-
-If you already prepared prompts and want a visual window, run:
+如果想用图形界面调整参数和查看结果：
 
 ```bash
 python web_ui.py
 ```
 
-Then you can:
+界面支持选择仓库、输入问题、调整检索参数、开启 LLM、运行评测、导出 trace、查看 bad case 和自动调参。
 
-- choose repo directory
-- input your prompt/query
-- adjust retrieval parameters (`top-k`, `chunk-size`, `overlap`, `recall-window`)
-- optionally enable LLM generation and pick mode/provider
+## 检索评测
 
-The output panel shows recalled code chunks and optional LLM response.
-
-
-## Retrieval Evaluation / Trace / Bad Case Analysis / Optimization
-
-Run retrieval evaluation:
+运行示例评测集：
 
 ```bash
-python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --top-k 5
+python scripts/retrieval_eval.py . datasets/eval/sample_evalset.json --top-k 5
 ```
 
-Save full trace (JSONL, one case per line):
+运行 20 条 trace 测试集：
 
 ```bash
-python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --trace-out artifacts/retrieval_trace.jsonl
+python scripts/retrieval_eval.py . datasets/eval/trace.jsonl --top-k 5 --trace-out artifacts/trace_eval_trace.jsonl
 ```
 
-Run bad case attribution + parameter optimization:
+保存完整检索 trace：
 
 ```bash
-python scripts/retrieval_eval.py datasets datasets/eval/sample_evalset.json --optimize
+python scripts/retrieval_eval.py . datasets/eval/sample_evalset.json --trace-out artifacts/retrieval_trace.jsonl
 ```
 
-Evalset format:
+执行 bad case 归因和参数搜索：
+
+```bash
+python scripts/retrieval_eval.py . datasets/eval/sample_evalset.json --optimize
+```
+
+评测集可以写成 JSON 数组：
 
 ```json
 [
-  {"id": "case-1", "query": "...", "relevant": ["coding_rag/bm25_retriever.py"]}
+  {"id": "case-1", "query": "BM25 检索器在哪里建立索引？", "relevant": ["coding_rag/bm25_retriever.py"]}
 ]
 ```
 
-## Tests
+也可以写成 JSONL，每行一个问题：
+
+```json
+{"id": "q001", "question": "代码文件是在哪里被读取的？", "gold_files": ["coding_rag/file_loader.py"]}
+```
+
+## LeetCode 数据
+
+LeetCode 的判题环境内置 `ListNode`、`TreeNode` 和多种 `Node` 类型。本项目提供 `leetcode_types.py` 作为本地补丁。下载 LeetCode 代码后可运行：
+
+```bash
+python scripts/patch_leetcode_imports.py datasets/leetcode-python
+```
+
+## 测试
 
 ```bash
 python -m unittest
-python -m compileall coding_rag main.py tests
+python -m compileall coding_rag rag scripts main.py web_ui.py tests
 ```

@@ -1,0 +1,20 @@
+{"id": "q001", "question": "代码文件是在哪里被读取的？", "gold_files": ["coding_rag/file_loader.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q002", "question": "系统是在哪里过滤 .git、.venv、__pycache__ 这些无关目录的？", "gold_files": ["coding_rag/file_loader.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q003", "question": "Python 文件内容是在哪里被切成 chunk 的？", "gold_files": ["coding_rag/code_splitter.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q004", "question": "chunk 的 start_line 和 end_line 是在哪里计算的？", "gold_files": ["coding_rag/code_splitter.py"], "task_type": "code_location", "difficulty": "medium"}
+{"id": "q005", "question": "BM25 检索器在哪里建立索引？", "gold_files": ["coding_rag/bm25_retriever.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q006", "question": "用户 query 是在哪里被送进 BM25 搜索的？", "gold_files": ["main.py", "coding_rag/bm25_retriever.py"], "task_type": "code_location", "difficulty": "medium"}
+{"id": "q007", "question": "初步召回后的代码块是在哪里被重新排序或筛选的？", "gold_files": ["coding_rag/result_filter.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q008", "question": "最终调用大模型 API 的代码在哪里？", "gold_files": ["coding_rag/llm_client.py"], "task_type": "code_location", "difficulty": "easy"}
+{"id": "q009", "question": "file_loader 读取一个 Python 文件后会保存哪些元信息？", "gold_files": ["coding_rag/file_loader.py"], "task_type": "code_explain", "difficulty": "medium"}
+{"id": "q010", "question": "代码切片模块是如何保证每个 chunk 带有文件路径和行号的？", "gold_files": ["coding_rag/code_splitter.py"], "task_type": "code_explain", "difficulty": "medium"}
+{"id": "q011", "question": "BM25 检索模块整体做了什么？它输入什么，输出什么？", "gold_files": ["coding_rag/bm25_retriever.py"], "task_type": "code_explain", "difficulty": "medium"}
+{"id": "q012", "question": "RepoPilot 从用户问题到返回答案的主流程在哪里组织？", "gold_files": ["main.py", "rag/answer_generator.py"], "task_type": "code_explain", "difficulty": "medium"}
+{"id": "q013", "question": "系统是如何把检索到的代码片段组织进 prompt 的？", "gold_files": ["rag/prompt.py", "rag/answer_generator.py"], "task_type": "code_explain", "difficulty": "medium"}
+{"id": "q014", "question": "回答生成模块如何把检索结果、大模型调用和最终回答串起来？", "gold_files": ["rag/answer_generator.py", "coding_rag/llm_client.py"], "task_type": "code_explain", "difficulty": "hard"}
+{"id": "q015", "question": "如果回答里显示的代码行号不准确，最应该检查哪些代码？", "gold_files": ["coding_rag/code_splitter.py", "coding_rag/file_loader.py"], "task_type": "bug_locate", "difficulty": "hard"}
+{"id": "q016", "question": "如果 BM25 已经召回了正确文件，但最终结果里没有它，应该检查哪里？", "gold_files": ["coding_rag/result_filter.py"], "task_type": "bug_locate", "difficulty": "hard"}
+{"id": "q017", "question": "如果用户提问后大模型没有返回结果或者 API 报错，应该优先看哪个模块？", "gold_files": ["coding_rag/llm_client.py", "rag/answer_generator.py"], "task_type": "bug_locate", "difficulty": "medium"}
+{"id": "q018", "question": "如果 Recall@3 一直是 0，但肉眼看检索结果里有正确文件，可能是哪里的问题？", "gold_files": ["scripts/retrieval_eval.py"], "task_type": "bug_locate", "difficulty": "hard"}
+{"id": "q019", "question": "如果输入仓库里没有任何 Python 文件，系统应该在哪里处理这种情况？", "gold_files": ["coding_rag/file_loader.py", "main.py"], "task_type": "edge_case", "difficulty": "medium"}
+{"id": "q020", "question": "如果某个文件行数少于 chunk_size，切片逻辑应该如何处理？", "gold_files": ["coding_rag/code_splitter.py"], "task_type": "edge_case", "difficulty": "medium"}

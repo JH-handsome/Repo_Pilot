@@ -1,3 +1,10 @@
+"""早期代码切片原型。
+
+当前主流程使用 `coding_rag.code_splitter` 中的 `CodeChunk` 数据类和切片函数。
+这里保留旧的 dict 风格实现，方便理解项目演进。
+"""
+
+
 def split_code_into_chunks(
     file: dict,
     chunk_size: int = 80,
