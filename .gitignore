@@ -9,4 +9,5 @@ llm_env/
 repo_pilot/
 datasets/leetcode-python/
 artifacts/*.jsonl
+artifacts/*.json
 data/indexes/

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from coding_rag.llm_client import LLMConfig, OpenAICompatibleChatClient
 
+from rag.citation_validator import append_citation_validation_report, validate_answer_citations
 from rag.prompt import (
     GenerationMode,
     build_user_prompt,
@@ -52,7 +53,7 @@ class AnswerGenerator:
 
         Args:
             query: 用户查询
-            results: BM25检索结果列表
+            results: 检索结果列表
 
         Returns:
             生成的答案
@@ -78,7 +79,8 @@ class AnswerGenerator:
 
         try:
             answer = self.client.complete(messages)
-            return answer
+            validation = validate_answer_citations(answer, results)
+            return append_citation_validation_report(answer, validation)
         except Exception as e:
             raise RuntimeError(f"生成答案失败: {e}") from e
 

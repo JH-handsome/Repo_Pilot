@@ -6,6 +6,7 @@ RepoPilot 主程序
 import argparse
 import sys
 
+from coding_rag.agent import CodeAgentConfig, agent_run_to_dict, render_agent_run, run_code_agent
 from coding_rag.bm25_retriever import BM25Retriever, SearchResult
 from coding_rag.code_splitter import split_python_files
 from coding_rag.context_recaller import expand_with_neighbor_chunks
@@ -21,6 +22,7 @@ from coding_rag.result_filter import filter_recalled_results
 
 from rag.answer_generator import AnswerGenerator, build_generator
 from rag.prompt import GenerationMode
+from rag.trace import build_retrieval_trace, render_trace_report, write_trace_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,17 +33,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="轻量级代码 RAG 搜索工具")
     parser.add_argument("repo_path", help="要搜索的代码仓库路径")
     parser.add_argument("query", help="搜索查询内容")
-    parser.add_argument("--top-k", type=int, default=5, help="BM25 初始检索结果数量")
+    parser.add_argument("--top-k", type=int, default=5, help="初始检索结果数量")
     parser.add_argument(
         "--candidate-k",
         type=int,
-        help="召回前的 BM25 候选结果数量，默认为 --top-k",
+        help="召回前的候选结果数量，默认为 --top-k",
     )
     parser.add_argument(
         "--recall-window",
         type=int,
         default=2,
-        help="每个 BM25 种子结果两侧召回的相邻代码块数量，设为 0 则禁用",
+        help="每个检索种子结果两侧召回的相邻代码块数量，设为 0 则禁用",
     )
     parser.add_argument(
         "--max-recall-results",
@@ -56,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-final-score",
         type=float,
-        help="丢弃最终 BM25 分数低于此值的代码块",
+        help="丢弃最终检索分数低于此值的代码块",
     )
     parser.add_argument(
         "--no-final-filter",
@@ -66,8 +68,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chunk-size", type=int, default=40, help="每个代码块的行数")
     parser.add_argument("--overlap", type=int, default=5, help="代码块之间的重叠行数")
     parser.add_argument("--show-tokens", action="store_true", help="在搜索前打印查询的分词结果")
+    parser.add_argument("--show-trace", action="store_true", help="打印 RAG 检索轨迹")
+    parser.add_argument("--trace-out", help="保存本次 RAG 检索轨迹 JSON")
+    parser.add_argument("--trace-include-text", action="store_true", help="Trace JSON 中包含完整代码文本")
+    parser.add_argument("--agent", action="store_true", help="以代码 Agent 工作流运行任务")
+    parser.add_argument("--agent-memory", default="artifacts/agent_memory.jsonl", help="Agent 记忆 JSONL 路径")
+    parser.add_argument("--agent-memory-limit", type=int, default=5, help="本次任务最多读取的相关记忆数量")
 
-    parser.add_argument("--llm", action="store_true", help="使用 LLM 基于 BM25 检索结果生成答案")
+    parser.add_argument("--llm", action="store_true", help="使用 LLM 基于检索结果生成答案")
     parser.add_argument(
         "--mode",
         choices=mode_choices,
@@ -108,6 +116,9 @@ def main() -> int:
         ensure_dotenv()
         load_dotenv()
 
+    if args.agent:
+        return run_agent_cli(args)
+
     python_files = load_python_files(args.repo_path)
     chunks = split_python_files(
         python_files,
@@ -126,7 +137,6 @@ def main() -> int:
         print()
 
     # 如果未指定候选数量，使用 top-k 的值
-    candidate_k = args.candidate_k or args.top_k
     candidate_k = args.candidate_k or args.top_k
     seed_results = retriever.search(args.query, top_k=candidate_k)
     max_recall_results = args.max_recall_results
@@ -152,10 +162,24 @@ def main() -> int:
             min_score=args.min_final_score,
         )
 
+    trace = build_retrieval_trace(
+        query=args.query,
+        seed_results=seed_results,
+        recalled_results=recalled_results,
+        final_results=results,
+        params=trace_params(args, candidate_k, max_recall_results),
+        include_text=args.trace_include_text,
+    )
+    if args.trace_out:
+        write_trace_json(args.trace_out, trace)
+    if args.show_trace:
+        print(render_trace_report(trace))
+        print()
+
     if args.recall_window > 0:
         # 打印召回统计信息
         print(
-            f"BM25 种子: {len(seed_results)} | "
+            f"Hybrid 种子: {len(seed_results)} | "
             f"召回代码块: {len(recalled_results)} | "
             f"最终代码块: {len(results)}"
         )
@@ -186,6 +210,54 @@ def main() -> int:
 
         print(answer.strip())
 
+    return 0
+
+
+def run_agent_cli(args: argparse.Namespace) -> int:
+    """运行代码 Agent 工作流。"""
+    client = None
+    if args.llm:
+        config = build_llm_config(
+            provider=args.llm_provider,
+            model=args.llm_model,
+            base_url=args.llm_base_url,
+            api_key_env=args.llm_api_key_env,
+            timeout=args.llm_timeout,
+            max_tokens=args.llm_max_tokens,
+            temperature=args.llm_temperature,
+        )
+        client = OpenAICompatibleChatClient(config)
+
+    try:
+        run = run_code_agent(
+            task=args.query,
+            config=CodeAgentConfig(
+                repo_path=args.repo_path,
+                top_k=args.top_k,
+                candidate_k=args.candidate_k,
+                chunk_size=args.chunk_size,
+                overlap=args.overlap,
+                recall_window=args.recall_window,
+                max_recall_results=args.max_recall_results,
+                final_k=args.final_k,
+                min_final_score=args.min_final_score,
+                memory_path=args.agent_memory,
+                memory_limit=args.agent_memory_limit,
+                max_context_chars=args.llm_context_chars,
+            ),
+            client=client,
+        )
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 3
+
+    if args.trace_out:
+        write_trace_json(args.trace_out, agent_run_to_dict(run))
+
+    print(render_agent_run(run, show_trace=args.show_trace))
     return 0
 
 
@@ -247,6 +319,25 @@ def print_search_results(results: list[SearchResult]) -> None:
         print(f"来源: {chunk.file_path}:{chunk.start_line}-{chunk.end_line}")
         print("-" * 80)
         print(chunk.text.rstrip())
+
+
+def trace_params(
+    args: argparse.Namespace,
+    candidate_k: int,
+    max_recall_results: int | None,
+) -> dict:
+    return {
+        "repo_path": args.repo_path,
+        "top_k": args.top_k,
+        "candidate_k": candidate_k,
+        "chunk_size": args.chunk_size,
+        "overlap": args.overlap,
+        "recall_window": args.recall_window,
+        "max_recall_results": max_recall_results,
+        "final_k": args.final_k if args.final_k is not None else args.top_k,
+        "min_final_score": args.min_final_score,
+        "no_final_filter": args.no_final_filter,
+    }
 
 
 def print_llm_setup_hint(provider: str, file) -> None:

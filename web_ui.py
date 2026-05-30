@@ -16,6 +16,7 @@ from coding_rag.file_loader import load_python_files
 from coding_rag.result_filter import filter_recalled_results
 from main import run_answer_generator
 from scripts.retrieval_eval import (
+    aggregate_stage_diagnostics,
     analyze_bad_case,
     build_eval_generator,
     build_stage_file_record,
@@ -25,10 +26,13 @@ from scripts.retrieval_eval import (
     mrr_and_recall_at_k,
     optimize,
     pipeline,
-    serialize_result,
     stage_files_path_for_trace,
+    stage_summary_path_for_trace,
+    write_json,
     write_jsonl,
+    render_stage_diagnostics_summary,
 )
+from rag.trace import build_retrieval_trace, render_trace_report
 
 
 class RepoPilotUI:
@@ -52,6 +56,7 @@ class RepoPilotUI:
         self.evalset_path_var = tk.StringVar(value="datasets/eval/sample_evalset.json")
         self.last_trace_path: Path | None = None
         self.last_stage_files_path: Path | None = None
+        self.last_stage_summary_path: Path | None = None
 
         self._build_layout()
 
@@ -160,10 +165,28 @@ class RepoPilotUI:
                 max_results=default_recall_max_results(self.top_k_var.get(), self.recall_window_var.get()),
             )
             results = filter_recalled_results(query, recalled, retriever, final_k=self.top_k_var.get())
+            trajectory = build_retrieval_trace(
+                query=query,
+                seed_results=seed,
+                recalled_results=recalled,
+                final_results=results,
+                params={
+                    "repo_path": repo_path,
+                    "top_k": self.top_k_var.get(),
+                    "chunk_size": self.chunk_size_var.get(),
+                    "overlap": self.overlap_var.get(),
+                    "recall_window": self.recall_window_var.get(),
+                },
+            )
 
             lines = [
-                f"BM25 种子: {len(seed)} | 召回代码块: {len(recalled)} | 最终代码块: {len(results)}",
+                f"Hybrid 种子: {len(seed)} | 召回代码块: {len(recalled)} | 最终代码块: {len(results)}",
                 "",
+                render_trace_report(trajectory, limit=8),
+                "",
+                "=" * 80,
+                "最终代码块",
+                "-" * 80,
                 self._render_results(results),
             ]
 
@@ -227,7 +250,30 @@ class RepoPilotUI:
                 seed, recalled, final = pipeline(self.repo_path_var.get().strip(), case.query, self.top_k_var.get(), self.chunk_size_var.get(), self.overlap_var.get(), self.recall_window_var.get())
                 rr, rec, hits = mrr_and_recall_at_k(final, case.relevant, self.top_k_var.get(), path_roots)
                 bad = analyze_bad_case(seed, recalled, final, case.relevant, self.top_k_var.get(), path_roots)
-                row = {"id": case.id, "query": case.query, "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits}, "bad_case": bad, "seed": [serialize_result(x) for x in seed], "recalled": [serialize_result(x) for x in recalled], "final": [serialize_result(x) for x in final]}
+                trajectory = build_retrieval_trace(
+                    query=case.query,
+                    seed_results=seed,
+                    recalled_results=recalled,
+                    final_results=final,
+                    params={
+                        "repo_path": self.repo_path_var.get().strip(),
+                        "top_k": self.top_k_var.get(),
+                        "chunk_size": self.chunk_size_var.get(),
+                        "overlap": self.overlap_var.get(),
+                        "recall_window": self.recall_window_var.get(),
+                    },
+                )
+                row = {
+                    "id": case.id,
+                    "query": case.query,
+                    "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits},
+                    "bad_case": bad,
+                    "trajectory": trajectory,
+                    "seed": trajectory["stages"]["initial_search"],
+                    "recalled": trajectory["stages"]["neighbor_recall"],
+                    "final": trajectory["stages"]["final_filter"],
+                    "context": trajectory["stages"]["context_compaction"],
+                }
                 if self.use_llm_var.get():
                     row["llm"] = generate_eval_answer(generator, llm_setup_error, case.query, final)
                 out_rows.append(row)
@@ -235,12 +281,16 @@ class RepoPilotUI:
 
             trace_path = Path("artifacts") / "ui_retrieval_trace.jsonl"
             stage_files_path = stage_files_path_for_trace(trace_path)
+            stage_summary_path = stage_summary_path_for_trace(trace_path)
+            stage_summary = aggregate_stage_diagnostics(stage_file_rows, out_rows)
             write_jsonl(trace_path, out_rows)
             write_jsonl(stage_files_path, stage_file_rows)
+            write_json(stage_summary_path, stage_summary)
             self.last_trace_path = trace_path
             self.last_stage_files_path = stage_files_path
+            self.last_stage_summary_path = stage_summary_path
             bad_cnt = sum(1 for r in out_rows if not r["bad_case"]["final_hit"])
-            self._set_output(self._render_eval_output(out_rows, bad_cnt, trace_path, stage_files_path))
+            self._set_output(self._render_eval_output(out_rows, bad_cnt, trace_path, stage_files_path, stage_summary_path, stage_summary))
             self._set_status("评测完成")
         except Exception as exc:
             self._set_output(f"评测失败: {exc}")
@@ -282,9 +332,8 @@ class RepoPilotUI:
             args = Args()
             args.repo_path = self.repo_path_var.get().strip()
             args.top_k = self.top_k_var.get()
-            # optimize prints to stdout; give user guidance in UI
-            optimize(args, cases)
-            self._set_output("自动调参已执行（结果已输出到终端日志）。")
+            report = optimize(args, cases)
+            self._set_output(report)
             self._set_status("调参完成")
         except Exception as exc:
             self._set_output(f"调参失败: {exc}")
@@ -309,6 +358,8 @@ class RepoPilotUI:
         bad_count: int,
         trace_path: Path,
         stage_files_path: Path | None = None,
+        stage_summary_path: Path | None = None,
+        stage_summary: dict | None = None,
     ) -> str:
         lines = [
             f"评测完成: {len(rows)} cases",
@@ -317,6 +368,10 @@ class RepoPilotUI:
         ]
         if stage_files_path:
             lines.append(f"Stage files: {stage_files_path}")
+        if stage_summary_path:
+            lines.append(f"Stage summary: {stage_summary_path}")
+        if stage_summary:
+            lines.extend(["", render_stage_diagnostics_summary(stage_summary)])
         for row in rows:
             metrics = row["metrics"]
             lines.extend([

@@ -1,6 +1,6 @@
 """
 上下文召回模块
-负责扩展 BM25 检索结果，召回相邻的代码块以提供更多上下文
+负责扩展检索结果，召回相邻的代码块以提供更多上下文
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ def expand_with_neighbor_chunks(
     max_results: int | None = 20,
 ) -> list[SearchResult]:
     """
-    扩展 BM25 种子结果，召回相邻的代码块
+    扩展检索种子结果，召回相邻的代码块
     
-    BM25 经常精确命中某一行范围，但会遗漏附近的定义、装饰器、
-    辅助函数或返回处理。这个阶段保留 BM25 种子结果，并添加同一文件中的相邻代码块。
+    检索经常精确命中某一行范围，但会遗漏附近的定义、装饰器、
+    辅助函数或返回处理。这个阶段保留种子结果，并添加同一文件中的相邻代码块。
     
     Args:
         chunks: 所有代码块的列表
-        seed_results: BM25 检索到的种子结果
+        seed_results: 检索到的种子结果
         window: 每个种子结果两侧召回的相邻代码块数量
         max_results: 返回的最大结果数量，None 表示不限制
         
@@ -48,7 +48,7 @@ def expand_with_neighbor_chunks(
         file_chunks = chunks_by_file.get(seed.chunk.file_path, [])
         seed_index = index_by_key.get(chunk_key(seed.chunk))
         if seed_index is None:
-            add_or_upgrade_result(recalled, seed, source="bm25")
+            add_or_upgrade_result(recalled, seed, source=seed.source)
             continue
 
         # 计算召回的起始和结束索引（不越界）
@@ -58,8 +58,8 @@ def expand_with_neighbor_chunks(
         for index in range(start, end):
             chunk = file_chunks[index]
             offset = index - seed_index  # 相对于种子结果的偏移量
-            # 设置来源标识：种子结果为 "bm25"，召回结果记录种子编号和偏移量
-            source = "bm25" if offset == 0 else f"recall:seed-{seed_rank}{offset:+d}"
+            # 设置来源标识：种子结果保留原检索来源，召回结果记录种子编号和偏移量。
+            source = seed.source if offset == 0 else f"recall:seed-{seed_rank}{offset:+d}"
             result = SearchResult(chunk=chunk, score=seed.score, source=source)
             add_or_upgrade_result(recalled, result, source=source)
 
@@ -116,7 +116,7 @@ def add_or_upgrade_result(
     """
     添加或升级召回结果
     
-    如果结果已存在且来源不是 "bm25"，则升级为 "bm25"
+    如果结果已存在且当前来源是种子检索结果，则升级为该种子来源。
     
     Args:
         recalled: 已召回的结果字典
@@ -129,9 +129,13 @@ def add_or_upgrade_result(
         recalled[key] = result
         return
 
-    # 如果当前来源是 "bm25" 而已存在结果的来源不是，则升级
-    if source == "bm25" and existing.source != "bm25":
-        recalled[key] = SearchResult(chunk=result.chunk, score=result.score, source="bm25")
+    # 如果当前来源是种子检索结果而已存在结果只是相邻召回，则升级。
+    if is_seed_source(source) and not is_seed_source(existing.source):
+        recalled[key] = SearchResult(chunk=result.chunk, score=result.score, source=source)
+
+
+def is_seed_source(source: str) -> bool:
+    return source in {"hybrid", "bm25"}
 
 
 def chunk_key(chunk: CodeChunk) -> tuple[Path, int, int]:

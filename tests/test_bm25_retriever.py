@@ -1,18 +1,12 @@
 from pathlib import Path
 import unittest
 
-from coding_rag.bm25_retriever import BM25Retriever, query_path_boost
+from coding_rag.bm25_retriever import BM25Retriever
 from coding_rag.code_splitter import CodeChunk
 
 
-class BM25RetrieverRoleBoostTest(unittest.TestCase):
-    def test_big_model_api_query_boosts_llm_client(self):
-        query = "\u6700\u7ec8\u8c03\u7528\u5927\u6a21\u578b API \u7684\u4ee3\u7801\u5728\u54ea\u91cc"
-
-        self.assertGreater(query_path_boost(query, Path("coding_rag/llm_client.py")), 0)
-        self.assertEqual(query_path_boost(query, Path("rag/prompt.py")), 0)
-
-    def test_search_uses_role_boost_for_semantic_file_location(self):
+class BM25RetrieverHybridSearchTest(unittest.TestCase):
+    def test_search_uses_hybrid_metadata_for_semantic_file_location(self):
         query = "\u5982\u679c Recall@3 \u4e00\u76f4\u662f 0\uff0c\u4f46\u8089\u773c\u770b\u68c0\u7d22\u7ed3\u679c\u91cc\u6709\u6b63\u786e\u6587\u4ef6"
         chunks = [
             CodeChunk(Path("rag/prompt.py"), 1, 10, "Recall context and answer prompt"),
@@ -22,6 +16,37 @@ class BM25RetrieverRoleBoostTest(unittest.TestCase):
         results = BM25Retriever(chunks).search(query, top_k=1)
 
         self.assertEqual(results[0].chunk.file_path, Path("scripts/retrieval_eval.py"))
+        self.assertEqual(results[0].source, "hybrid")
+
+    def test_search_uses_symbol_metadata_without_path_patch(self):
+        chunks = [
+            CodeChunk(Path("a.py"), 1, 10, "def complete(messages):\n    return send(messages)"),
+            CodeChunk(Path("b.py"), 1, 10, "def render_prompt(context):\n    return context"),
+        ]
+
+        results = BM25Retriever(chunks).search("complete 函数在哪里", top_k=1)
+
+        self.assertEqual(results[0].chunk.file_path, Path("a.py"))
+
+    def test_search_deprioritizes_tests_without_test_intent(self):
+        chunks = [
+            CodeChunk(Path("coding_rag/loader.py"), 1, 10, "def load_data():\n    return []"),
+            CodeChunk(Path("tests/test_loader.py"), 1, 10, "def test_load_data():\n    assert load_data() == []"),
+        ]
+
+        results = BM25Retriever(chunks).search("load_data 是如何实现的", top_k=1)
+
+        self.assertEqual(results[0].chunk.file_path, Path("coding_rag/loader.py"))
+
+    def test_search_allows_tests_when_query_asks_for_tests(self):
+        chunks = [
+            CodeChunk(Path("coding_rag/loader.py"), 1, 10, "def load_data():\n    return []"),
+            CodeChunk(Path("tests/test_loader.py"), 1, 10, "def test_load_data():\n    assert load_data() == []"),
+        ]
+
+        results = BM25Retriever(chunks).search("load_data 的测试在哪里", top_k=1)
+
+        self.assertEqual(results[0].chunk.file_path, Path("tests/test_loader.py"))
 
     def test_search_prefers_file_diversity_before_duplicate_chunks(self):
         chunks = [

@@ -22,6 +22,7 @@ from coding_rag.llm_client import available_provider_names
 from coding_rag.result_filter import filter_recalled_results
 from rag.answer_generator import AnswerGenerator, build_generator
 from rag.prompt import GenerationMode
+from rag.trace import build_retrieval_trace
 
 
 @dataclass
@@ -29,6 +30,22 @@ class EvalCase:
     id: str
     query: str
     relevant: list[str]
+
+
+STAGE_DIAGNOSIS_ORDER = [
+    "hit_final_top_k",
+    "missing_in_initial_search",
+    "lost_during_recall_review",
+    "recall_review_pushed_below_top_k",
+    "filtered_after_recall_review",
+]
+
+OPTIMIZATION_SEARCH_SPACE = [
+    (30, 5, 1),
+    (40, 5, 1),
+    (60, 10, 1),
+    (60, 10, 2),
+]
 
 
 def load_evalset(path: str) -> list[EvalCase]:
@@ -279,6 +296,98 @@ def diagnose_stage_drop(
     return "filtered_after_recall_review"
 
 
+def aggregate_stage_diagnostics(
+    stage_records: list[dict],
+    trace_rows: list[dict] | None = None,
+    context_char_warning: int = 12000,
+) -> dict:
+    counts = {diagnosis: 0 for diagnosis in STAGE_DIAGNOSIS_ORDER}
+    cases_by_diagnosis = {diagnosis: [] for diagnosis in STAGE_DIAGNOSIS_ORDER}
+
+    for record in stage_records:
+        diagnosis = str(record.get("diagnosis") or "unknown")
+        case_id = str(record.get("id") or "")
+        if diagnosis not in counts:
+            counts[diagnosis] = 0
+            cases_by_diagnosis[diagnosis] = []
+        counts[diagnosis] += 1
+        if case_id:
+            cases_by_diagnosis[diagnosis].append(case_id)
+
+    bad_case_ids = [
+        case_id
+        for diagnosis, case_ids in cases_by_diagnosis.items()
+        if diagnosis != "hit_final_top_k"
+        for case_id in case_ids
+    ]
+
+    context_totals = context_char_totals(trace_rows or [])
+    long_context_case_ids: list[str] = []
+    if trace_rows:
+        for row, total_chars in zip(trace_rows, context_totals):
+            if total_chars > context_char_warning:
+                long_context_case_ids.append(str(row.get("id") or ""))
+
+    return {
+        "total": len(stage_records),
+        "diagnosis_counts": counts,
+        "cases_by_diagnosis": cases_by_diagnosis,
+        "bad_case_ids": bad_case_ids,
+        "context": {
+            "case_count": len(context_totals),
+            "avg_chars": mean(context_totals) if context_totals else 0.0,
+            "max_chars": max(context_totals) if context_totals else 0,
+            "warning_threshold": context_char_warning,
+            "over_threshold_case_ids": [case_id for case_id in long_context_case_ids if case_id],
+        },
+    }
+
+
+def context_char_totals(trace_rows: list[dict]) -> list[int]:
+    totals: list[int] = []
+    for row in trace_rows:
+        context_blocks = row.get("context")
+        if context_blocks is None:
+            context_blocks = row.get("trajectory", {}).get("stages", {}).get("context_compaction", [])
+
+        total = 0
+        for block in context_blocks:
+            total += int(block.get("char_count") or len(block.get("text") or block.get("preview") or ""))
+        totals.append(total)
+    return totals
+
+
+def render_stage_diagnostics_summary(summary: dict) -> str:
+    lines = ["Stage diagnostics:"]
+    counts = summary.get("diagnosis_counts") or {}
+    for diagnosis in ordered_diagnoses(counts):
+        lines.append(f"- {diagnosis}: {counts[diagnosis]}")
+
+    bad_case_ids = summary.get("bad_case_ids") or []
+    if bad_case_ids:
+        lines.append(f"- bad_case_ids: {', '.join(bad_case_ids)}")
+
+    context = summary.get("context") or {}
+    if context.get("case_count"):
+        lines.append(
+            "- context_chars: "
+            f"avg={context.get('avg_chars', 0.0):.1f}, "
+            f"max={context.get('max_chars', 0)}, "
+            f"threshold={context.get('warning_threshold', 0)}"
+        )
+        over_threshold = context.get("over_threshold_case_ids") or []
+        if over_threshold:
+            lines.append(f"- context_over_threshold: {', '.join(over_threshold)}")
+
+    return "\n".join(lines)
+
+
+def ordered_diagnoses(counts: dict[str, int]) -> list[str]:
+    known = [diagnosis for diagnosis in STAGE_DIAGNOSIS_ORDER if diagnosis in counts]
+    unknown = sorted(diagnosis for diagnosis in counts if diagnosis not in STAGE_DIAGNOSIS_ORDER)
+    return known + unknown
+
+
 def is_relevant_result(
     result: SearchResult,
     relevant: list[str],
@@ -331,6 +440,17 @@ def stage_files_path_for_trace(trace_path: str | Path) -> Path:
     return path.with_name(f"{path.stem}_stage_files{suffix}")
 
 
+def stage_summary_path_for_trace(trace_path: str | Path) -> Path:
+    path = Path(trace_path)
+    return path.with_name(f"{path.stem}_stage_summary.json")
+
+
+def write_json(path: str | Path, data: dict) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def write_jsonl(path: str | Path, rows: list[dict]) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -357,6 +477,7 @@ def run_eval(args: argparse.Namespace) -> int:
     trace_path.parent.mkdir(parents=True, exist_ok=True)
     stage_files_out = getattr(args, "stage_files_out", None)
     stage_files_path = Path(stage_files_out) if stage_files_out else stage_files_path_for_trace(trace_path)
+    stage_summary_path = stage_summary_path_for_trace(trace_path)
 
     per_case: list[dict] = []
     stage_file_records: list[dict] = []
@@ -371,14 +492,29 @@ def run_eval(args: argparse.Namespace) -> int:
         )
         rr, recall_at_k, hit_count = mrr_and_recall_at_k(final, case.relevant, args.top_k, path_roots)
         bad = analyze_bad_case(seed, recalled, final, case.relevant, args.top_k, path_roots)
+        trajectory = build_retrieval_trace(
+            query=case.query,
+            seed_results=seed,
+            recalled_results=recalled,
+            final_results=final,
+            params={
+                "repo_path": args.repo_path,
+                "top_k": args.top_k,
+                "chunk_size": args.chunk_size,
+                "overlap": args.overlap,
+                "recall_window": args.recall_window,
+            },
+        )
         record = {
             "id": case.id,
             "query": case.query,
             "metrics": {"rr": rr, "recall_at_k": recall_at_k, "hit_count": hit_count},
             "bad_case": bad,
-            "seed": [serialize_result(x) for x in seed],
-            "recalled": [serialize_result(x) for x in recalled],
-            "final": [serialize_result(x) for x in final],
+            "trajectory": trajectory,
+            "seed": trajectory["stages"]["initial_search"],
+            "recalled": trajectory["stages"]["neighbor_recall"],
+            "final": trajectory["stages"]["final_filter"],
+            "context": trajectory["stages"]["context_compaction"],
         }
         if args.llm:
             record["llm"] = generate_eval_answer(generator, llm_setup_error, case.query, final)
@@ -387,6 +523,8 @@ def run_eval(args: argparse.Namespace) -> int:
 
     write_jsonl(trace_path, per_case)
     write_jsonl(stage_files_path, stage_file_records)
+    stage_summary = aggregate_stage_diagnostics(stage_file_records, per_case)
+    write_json(stage_summary_path, stage_summary)
 
     mrr = mean(item["metrics"]["rr"] for item in per_case) if per_case else 0.0
     avg_recall = mean(item["metrics"]["recall_at_k"] for item in per_case) if per_case else 0.0
@@ -398,6 +536,8 @@ def run_eval(args: argparse.Namespace) -> int:
     print(f"Bad cases: {len(bad_cases)}")
     print(f"Trace saved: {trace_path}")
     print(f"Stage files saved: {stage_files_path}")
+    print(f"Stage summary saved: {stage_summary_path}")
+    print(render_stage_diagnostics_summary(stage_summary))
     if args.llm:
         print_llm_outputs(per_case)
 
@@ -407,43 +547,60 @@ def run_eval(args: argparse.Namespace) -> int:
     return 0
 
 
-def optimize(args: argparse.Namespace, cases: list[EvalCase]) -> None:
-    print("\n=== 参数搜索（切片 / 检索）===")
+def optimize(args: argparse.Namespace, cases: list[EvalCase]) -> str:
+    rows, best = collect_optimization_results(args, cases)
+    report = render_optimization_report(rows, best, args.top_k)
+    print(f"\n{report}")
+    return report
+
+
+def collect_optimization_results(args: argparse.Namespace, cases: list[EvalCase]) -> tuple[list[dict], dict | None]:
     path_roots = [Path(args.repo_path).resolve()]
-    search_space = [
-        (30, 5, 1),
-        (40, 5, 1),
-        (60, 10, 1),
-        (60, 10, 2),
-    ]
-    best = None
-    for chunk_size, overlap, recall_window in search_space:
+    rows: list[dict] = []
+    best: dict | None = None
+    for chunk_size, overlap, recall_window in OPTIMIZATION_SEARCH_SPACE:
         scores: list[float] = []
         for case in cases:
             _, _, final = pipeline(args.repo_path, case.query, args.top_k, chunk_size, overlap, recall_window)
             rr, _, _ = mrr_and_recall_at_k(final, case.relevant, args.top_k, path_roots)
             scores.append(rr)
         mrr = mean(scores) if scores else 0.0
-        print(f"chunk={chunk_size}, overlap={overlap}, recall_window={recall_window} -> MRR@{args.top_k}={mrr:.4f}")
-        if best is None or mrr > best[0]:
-            best = (mrr, chunk_size, overlap, recall_window)
+        row = {
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "recall_window": recall_window,
+            "mrr": mrr,
+        }
+        rows.append(row)
+        if best is None or mrr > best["mrr"]:
+            best = row
+
+    return rows, best
+
+
+def render_optimization_report(rows: list[dict], best: dict | None, top_k: int) -> str:
+    lines = ["=== 参数搜索（切片 / 检索）==="]
+    if not rows:
+        lines.append("没有可评测的 case。")
+        return "\n".join(lines)
+
+    for row in rows:
+        lines.append(
+            f"chunk={row['chunk_size']}, overlap={row['overlap']}, "
+            f"recall_window={row['recall_window']} -> MRR@{top_k}={row['mrr']:.4f}"
+        )
 
     if best:
-        print(
+        lines.append(
             "推荐参数: "
-            f"chunk-size={best[1]}, overlap={best[2]}, recall-window={best[3]} (MRR@{args.top_k}={best[0]:.4f})"
+            f"--chunk-size {best['chunk_size']} "
+            f"--overlap {best['overlap']} "
+            f"--recall-window {best['recall_window']} "
+            f"(MRR@{top_k}={best['mrr']:.4f})"
         )
-        print("Prompt 优化建议: 在系统提示里强制‘先相关块列表，后答案；证据不足时明确拒答’。")
+        lines.append("Prompt 优化建议: 在系统提示里强制‘先相关块列表，后答案；证据不足时明确拒答’。")
 
-
-def serialize_result(result: SearchResult) -> dict:
-    return {
-        "file": str(result.chunk.file_path),
-        "start_line": result.chunk.start_line,
-        "end_line": result.chunk.end_line,
-        "score": result.score,
-        "source": result.source,
-    }
+    return "\n".join(lines)
 
 
 def print_llm_outputs(rows: list[dict]) -> None:

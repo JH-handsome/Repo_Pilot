@@ -23,6 +23,17 @@ class ContextRecallerTest(unittest.TestCase):
         self.assertEqual(results[0].source, "recall:seed-1-1")
         self.assertEqual(results[2].source, "recall:seed-1+1")
 
+    def test_seed_source_is_preserved(self):
+        chunks = [
+            CodeChunk(Path("a.py"), 1, 10, "before"),
+            CodeChunk(Path("a.py"), 11, 20, "hit"),
+        ]
+        seeds = [SearchResult(chunks[1], 3.0, source="hybrid")]
+
+        results = expand_with_neighbor_chunks(chunks, seeds, window=1)
+
+        self.assertEqual(results[1].source, "hybrid")
+
     def test_window_zero_returns_seeds(self):
         chunk = CodeChunk(Path("a.py"), 1, 10, "hit")
         seeds = [SearchResult(chunk, 3.0)]

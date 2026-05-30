@@ -1,7 +1,4 @@
-"""
-分词器模块
-负责对代码和查询文本进行分词，支持中文和英文标识符
-"""
+"""Code/query tokenizer."""
 
 import re
 from dataclasses import dataclass
@@ -15,23 +12,46 @@ CAMEL_BOUNDARY_1 = re.compile(r"(.)([A-Z][a-z]+)")
 CAMEL_BOUNDARY_2 = re.compile(r"([a-z0-9])([A-Z])")
 
 
+CHINESE_CODE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "检索": ("retrieval", "search"),
+    "搜索": ("search",),
+    "评测": ("eval", "evaluation"),
+    "评价": ("eval", "evaluation"),
+    "召回": ("recall",),
+    "结果": ("result",),
+    "文件": ("file",),
+    "正确": ("relevant", "correct"),
+    "相关": ("relevant",),
+    "过滤": ("filter",),
+    "筛选": ("filter",),
+    "排序": ("rank", "sort"),
+    "分词": ("tokenize", "tokenizer"),
+    "切片": ("chunk", "split"),
+    "代码块": ("chunk",),
+    "大模型": ("llm",),
+    "调用": ("call", "client"),
+    "被调用": ("call", "caller", "callee"),
+    "导入": ("import", "from"),
+    "引用": ("reference", "import"),
+    "接口": ("api",),
+    "函数": ("function", "def"),
+    "方法": ("method", "function", "def"),
+    "类": ("class",),
+    "签名": ("signature",),
+    "继承": ("inherit", "base", "class"),
+    "模块": ("module",),
+    "路径": ("path", "file"),
+    "文件树": ("filetree", "tree", "path"),
+    "索引": ("index",),
+    "测试": ("test", "testing"),
+    "单测": ("test", "unittest"),
+    "断言": ("assert",),
+}
+
+
 @dataclass(frozen=True)
 class CodeTokenizer:
-    """
-    代码分词器
-    
-    设计为轻量级且无依赖：
-    - 保留完整标识符，如 `build_binary_tree`
-    - 将 snake_case 分割为 `build`、`binary`、`tree`
-    - 将 camelCase/PascalCase 分割为更小的单词
-    - 保留数字
-    - 将中文文本展开为短 n-gram，用于查询如 `二叉树`
-    
-    Attributes:
-        keep_full_identifier: 是否保留完整的标识符
-        chinese_ngram_min: 中文 n-gram 的最小长度
-        chinese_ngram_max: 中文 n-gram 的最大长度
-    """
+    """Lightweight tokenizer."""
 
     keep_full_identifier: bool = True
     chinese_ngram_min: int = 1
@@ -103,6 +123,10 @@ class CodeTokenizer:
         for n in range(self.chinese_ngram_min, max_n + 1):
             for start in range(0, len(text) - n + 1):
                 tokens.append(text[start : start + n])
+
+        for term, synonyms in CHINESE_CODE_SYNONYMS.items():
+            if term in text:
+                tokens.extend(synonym for synonym in synonyms if synonym not in tokens)
 
         return tokens
 

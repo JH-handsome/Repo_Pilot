@@ -24,7 +24,7 @@ def filter_recalled_results(
     Args:
         query: 原始查询文本
         recalled_results: 召回的结果列表
-        retriever: BM25 检索器，用于重新评分
+        retriever: 检索器，用于重新评分
         final_k: 最终保留的结果数量，None 表示不限制
         min_score: 最低分数阈值，低于此值的结果将被过滤
         
@@ -65,8 +65,8 @@ def sort_key(index_and_result: tuple[int, SearchResult]) -> tuple[float, int, in
     生成排序键
     
     排序优先级：
-    1. BM25 分数（越高越好）
-    2. 来源优先级（bm25 > recall）
+    1. 检索分数（越高越好）
+    2. 来源优先级（hybrid/bm25 > recall）
     3. 召回顺序（越早越好，使用负索引实现）
     
     Args:
@@ -87,6 +87,6 @@ def source_priority(source: str) -> int:
         source: 来源标识字符串
         
     Returns:
-        优先级值，bm25 返回 1，其他返回 0
+        优先级值，hybrid/bm25 返回 1，其他返回 0
     """
-    return 1 if source == "bm25" else 0
+    return 1 if source in {"hybrid", "bm25"} else 0

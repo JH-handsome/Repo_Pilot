@@ -10,7 +10,7 @@
 """
 
 from enum import Enum
-from typing import Literal
+from dataclasses import dataclass
 
 
 class GenerationMode(str, Enum):
@@ -27,7 +27,7 @@ class GenerationMode(str, Enum):
 JUDGE_SYSTEM_PROMPT = """你是一个专业的代码搜索助手。你的任务是判断哪些代码块与用户查询相关，并根据相关代码块提供准确的答案。
 
 ## 代码块来源标签
-- source=bm25: 直接匹配查询的代码块（高相关性）
+- source=hybrid/bm25: 直接匹配查询的代码块（高相关性）
 - source=recall:*: 作为上下文召回的相邻代码块（补充信息）
 
 ## 回答规则
@@ -63,7 +63,7 @@ def build_judge_user_prompt(query: str, context: str) -> str:
 CODE_UNDERSTAND_SYSTEM_PROMPT = """你是一个专业的代码理解和解释助手。你的任务是基于提供的参考代码块，深入解释代码的工作原理、设计思想和关键实现。
 
 ## 代码块来源标签
-- source=bm25: 直接匹配查询的代码块（主要参考对象）
+- source=hybrid/bm25: 直接匹配查询的代码块（主要参考对象）
 - source=recall:*: 作为上下文召回的相邻代码块（补充上下文）
 
 ## 解释规则
@@ -101,7 +101,7 @@ def build_code_understand_user_prompt(query: str, context: str) -> str:
 CODE_GENERATE_SYSTEM_PROMPT = """你是一个专业的代码生成助手。你的任务是基于提供的参考代码块生成满足用户需求的代码实现。
 
 ## 代码块来源标签
-- source=bm25: 直接匹配查询的代码块（主要参考对象）
+- source=hybrid/bm25: 直接匹配查询的代码块（主要参考对象）
 - source=recall:*: 作为上下文召回的相邻代码块（补充上下文）
 
 ## 代码生成规则
@@ -137,7 +137,7 @@ def build_code_generate_user_prompt(query: str, context: str) -> str:
 LEETCODE_SYSTEM_PROMPT = """你是一个专业的算法问题解答助手。你的任务是基于提供的参考代码块为 LeetCode 问题提供高质量的解决方案。
 
 ## 代码块来源标签
-- source=bm25: 直接匹配查询的代码块（相关算法实现）
+- source=hybrid/bm25: 直接匹配查询的代码块（相关算法实现）
 - source=recall:*: 作为上下文召回的相邻代码块（相关数据结构或辅助函数）
 
 ## 问题解答规则
@@ -174,7 +174,7 @@ def build_leetcode_user_prompt(query: str, context: str) -> str:
 API_SYSTEM_PROMPT = """你是一个专业的 API 使用指南助手。你的任务是基于提供的参考代码块生成清晰准确的 API 使用示例代码。
 
 ## 代码块来源标签
-- source=bm25: 直接匹配查询的代码块（API 定义或使用示例）
+- source=hybrid/bm25: 直接匹配查询的代码块（API 定义或使用示例）
 - source=recall:*: 作为上下文召回的相邻代码块（相关类定义或辅助代码）
 
 ## 生成规则
@@ -247,6 +247,32 @@ def build_user_prompt(
     return builder(query, context)
 
 
+@dataclass(frozen=True)
+class ContextBlock:
+    """发送给 LLM 的合并后证据块"""
+
+    file_path: object
+    start_line: int
+    end_line: int
+    text: str
+    score: float
+    sources: tuple[str, ...]
+    chunk_count: int
+    first_rank: int
+
+
+@dataclass
+class _PendingContextBlock:
+    file_path: object
+    start_line: int
+    end_line: int
+    lines: list[str]
+    score: float
+    sources: list[str]
+    chunk_count: int
+    first_rank: int
+
+
 def format_results_as_context(
     results: list,
     max_context_chars: int = 12000,
@@ -263,16 +289,19 @@ def format_results_as_context(
     """
     blocks: list[str] = []
     used_chars = 0  # 已使用的字符计数
+    context_blocks = compact_results_for_context(results)
 
-    # 遍历所有检索结果
-    for index, result in enumerate(results, start=1):
-        chunk = result.chunk
+    # 遍历所有合并后的检索结果
+    for index, block_info in enumerate(context_blocks, start=1):
         # 构建代码块头部信息
+        source_label = "source" if len(block_info.sources) == 1 else "sources"
+        sources = ",".join(block_info.sources)
+        chunk_note = f", chunks={block_info.chunk_count}" if block_info.chunk_count > 1 else ""
         header = (
-            f"### [{index}] {chunk.file_path}:{chunk.start_line}-{chunk.end_line} "
-            f"(score={result.score:.4f}, source={result.source})"
+            f"### [{index}] {block_info.file_path}:{block_info.start_line}-{block_info.end_line} "
+            f"(score={block_info.score:.4f}, {source_label}={sources}{chunk_note})"
         )
-        block = f"{header}\n```python\n{chunk.text.rstrip()}\n```"
+        block = f"{header}\n```python\n{block_info.text.rstrip()}\n```"
 
         # 计算剩余可用字符数
         remaining = max_context_chars - used_chars
@@ -284,7 +313,7 @@ def format_results_as_context(
             header_len = len(header) + len("\n```python\n```")
             max_code_len = max(0, remaining - header_len - 20)
             if max_code_len > 0:
-                truncated_code = chunk.text.rstrip()[:max_code_len] + "\n...[代码已截断]"
+                truncated_code = block_info.text.rstrip()[:max_code_len] + "\n...[代码已截断]"
                 block = f"{header}\n```python\n{truncated_code}\n```"
             else:
                 block = block[:max(0, remaining - 40)].rstrip() + "\n...[代码已截断]"
@@ -293,3 +322,68 @@ def format_results_as_context(
         used_chars += len(block)
 
     return "\n\n".join(blocks)
+
+
+def compact_results_for_context(results: list) -> list[ContextBlock]:
+    """合并同文件中连续或重叠的检索块，减少上下文重复"""
+    indexed_results = list(enumerate(results))
+    results_by_file: dict[object, list[tuple[int, object]]] = {}
+    for rank, result in indexed_results:
+        results_by_file.setdefault(result.chunk.file_path, []).append((rank, result))
+
+    pending_blocks: list[_PendingContextBlock] = []
+    for file_results in results_by_file.values():
+        file_results.sort(key=lambda item: (item[1].chunk.start_line, item[1].chunk.end_line, item[0]))
+        file_blocks: list[_PendingContextBlock] = []
+
+        for rank, result in file_results:
+            chunk = result.chunk
+            lines = chunk.text.splitlines()
+            if not file_blocks or chunk.start_line > file_blocks[-1].end_line + 1:
+                file_blocks.append(
+                    _PendingContextBlock(
+                        file_path=chunk.file_path,
+                        start_line=chunk.start_line,
+                        end_line=chunk.end_line,
+                        lines=list(lines),
+                        score=result.score,
+                        sources=[result.source],
+                        chunk_count=1,
+                        first_rank=rank,
+                    )
+                )
+                continue
+
+            merge_result_into_block(file_blocks[-1], result, rank)
+
+        pending_blocks.extend(file_blocks)
+
+    pending_blocks.sort(key=lambda block: block.first_rank)
+    return [
+        ContextBlock(
+            file_path=block.file_path,
+            start_line=block.start_line,
+            end_line=block.end_line,
+            text="\n".join(block.lines),
+            score=block.score,
+            sources=tuple(block.sources),
+            chunk_count=block.chunk_count,
+            first_rank=block.first_rank,
+        )
+        for block in pending_blocks
+    ]
+
+
+def merge_result_into_block(block: _PendingContextBlock, result, rank: int) -> None:
+    chunk = result.chunk
+    new_lines = chunk.text.splitlines()
+    overlap_line_count = max(0, block.end_line - chunk.start_line + 1)
+    if overlap_line_count < len(new_lines):
+        block.lines.extend(new_lines[overlap_line_count:])
+
+    block.end_line = max(block.end_line, chunk.end_line)
+    block.score = max(block.score, result.score)
+    block.chunk_count += 1
+    block.first_rank = min(block.first_rank, rank)
+    if result.source not in block.sources:
+        block.sources.append(result.source)

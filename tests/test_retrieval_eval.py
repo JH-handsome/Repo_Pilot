@@ -6,12 +6,16 @@ from coding_rag.bm25_retriever import SearchResult
 from coding_rag.code_splitter import CodeChunk
 from scripts.retrieval_eval import (
     EvalCase,
+    aggregate_stage_diagnostics,
     analyze_bad_case,
     build_stage_file_record,
     default_recall_max_results,
     load_evalset,
     mrr_and_recall_at_k,
+    render_optimization_report,
+    render_stage_diagnostics_summary,
     stage_files_path_for_trace,
+    stage_summary_path_for_trace,
 )
 
 
@@ -219,6 +223,56 @@ class RetrievalEvalPathMatchingTest(unittest.TestCase):
         self.assertTrue(record["initial_review"]["hit"])
         self.assertTrue(record["recall_review_top_k"]["hit"])
         self.assertFalse(record["final"]["hit"])
+
+    def test_stage_summary_path_is_derived_from_trace_path(self):
+        self.assertEqual(
+            stage_summary_path_for_trace(Path("artifacts/retrieval_trace.jsonl")),
+            Path("artifacts/retrieval_trace_stage_summary.json"),
+        )
+
+    def test_stage_diagnostics_summary_aggregates_drop_reasons(self):
+        summary = aggregate_stage_diagnostics(
+            [
+                {"id": "q001", "diagnosis": "hit_final_top_k"},
+                {"id": "q002", "diagnosis": "missing_in_initial_search"},
+                {"id": "q003", "diagnosis": "filtered_after_recall_review"},
+            ],
+            [
+                {"id": "q001", "context": [{"char_count": 20}]},
+                {"id": "q002", "context": [{"char_count": 150}]},
+                {"id": "q003", "context": [{"char_count": 60}]},
+            ],
+            context_char_warning=100,
+        )
+
+        self.assertEqual(summary["total"], 3)
+        self.assertEqual(summary["diagnosis_counts"]["hit_final_top_k"], 1)
+        self.assertEqual(summary["diagnosis_counts"]["missing_in_initial_search"], 1)
+        self.assertEqual(summary["diagnosis_counts"]["filtered_after_recall_review"], 1)
+        self.assertEqual(summary["bad_case_ids"], ["q002", "q003"])
+        self.assertEqual(summary["context"]["max_chars"], 150)
+        self.assertEqual(summary["context"]["over_threshold_case_ids"], ["q002"])
+
+        report = render_stage_diagnostics_summary(summary)
+
+        self.assertIn("missing_in_initial_search: 1", report)
+        self.assertIn("bad_case_ids: q002, q003", report)
+        self.assertIn("context_over_threshold: q002", report)
+
+    def test_optimization_report_is_reusable_by_cli_and_ui(self):
+        best = {"chunk_size": 40, "overlap": 5, "recall_window": 1, "mrr": 0.75}
+
+        report = render_optimization_report(
+            rows=[
+                {"chunk_size": 30, "overlap": 5, "recall_window": 1, "mrr": 0.25},
+                best,
+            ],
+            best=best,
+            top_k=5,
+        )
+
+        self.assertIn("MRR@5=0.7500", report)
+        self.assertIn("--chunk-size 40 --overlap 5 --recall-window 1", report)
 
 
 if __name__ == "__main__":

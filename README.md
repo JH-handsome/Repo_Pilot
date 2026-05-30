@@ -1,12 +1,12 @@
 # RepoPilot：轻量级代码 RAG 检索工具
 
-RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一个 Python 仓库，把代码切成带行号的片段，用 BM25 找出和问题最相关的代码块，并可选调用大模型生成回答。
+RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一个 Python 仓库，把代码切成带行号的片段，用 Hybrid Search 找出和问题最相关的代码块，并可选调用大模型生成回答。
 
 ## 项目结构
 
 ```text
 .
-├── coding_rag/              # 核心检索流程：加载、切片、分词、BM25、召回、过滤、LLM 客户端
+├── coding_rag/              # 核心检索流程：加载、切片、分词、Hybrid Search、召回、过滤、LLM 客户端
 ├── rag/                     # 面向大模型的提示词模板和答案生成器
 ├── scripts/                 # 离线脚本：检索评测、LeetCode 兼容补丁、数据下载
 ├── datasets/
@@ -46,25 +46,29 @@ python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
 
 1. `file_loader` 递归读取 Python 文件，并跳过 `.git`、虚拟环境、缓存目录。
 2. `code_splitter` 按行号把文件切成 `CodeChunk`。
-3. `BM25Retriever` 建立 BM25 索引并检索种子代码块。
+3. `BM25Retriever` 建立正文 BM25、路径/符号 BM25 和 token 覆盖度信号，并融合检索种子代码块。
 4. `context_recaller` 召回同文件相邻代码块，补足上下文。
 5. `result_filter` 重新评分并保留最终上下文。
-6. CLI 打印代码块；如果开启 `--llm`，再把上下文交给大模型回答。
+6. `rag.prompt` 在发送给 LLM 前合并同文件连续/重叠代码块，减少重复上下文。
+7. CLI 打印代码块；如果开启 `--llm`，再把上下文交给大模型回答。
 
 常用参数：
 
 ```bash
 python main.py . "代码在哪里切成 chunk？" --top-k 5 --recall-window 2
 python main.py . "代码在哪里切成 chunk？" --candidate-k 20 --max-recall-results 30
-python main.py . "代码在哪里切成 chunk？" --final-k 5 --min-final-score 1
+python main.py . "代码在哪里切成 chunk？" --final-k 5 --min-final-score 0.1
 python main.py . "代码在哪里切成 chunk？" --show-tokens
+python main.py . "代码在哪里切成 chunk？" --show-trace
+python main.py . "代码在哪里切成 chunk？" --trace-out artifacts/query_trace.json
 ```
 
-分词器会同时照顾代码标识符和中文查询：
+分词器会同时照顾代码标识符、中文查询和常见中英代码检索词：
 
 - `build_binary_tree` 会保留完整词，并拆成 `build`、`binary`、`tree`
 - `twoSum` 会拆成 `twosum`、`two`、`sum`
 - 中文查询会展开成短 n-gram，方便匹配中文注释和问题
+- `检索`、`评测`、`文件` 等中文词会扩展出 `retrieval`、`eval`、`file` 等通用英文检索词，方便匹配英文路径和符号
 
 ## 大模型回答
 
@@ -116,6 +120,42 @@ $env:LLM_MODEL="your-model"
 python main.py . "linked list cycle" --llm --llm-provider custom
 ```
 
+## Agent 工作流
+
+如果希望从“用户任务”出发，让 RepoPilot 自动读取记忆、检索上下文、生成实施计划，并记录本次经验：
+
+```bash
+python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent
+```
+
+启用 LLM 后，Agent 会基于检索上下文和历史记忆生成更具体的实现草案：
+
+```bash
+python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent --llm --llm-provider deepseek
+```
+
+常用参数：
+
+```bash
+python main.py . "优化 trace 分析" --agent --show-trace
+python main.py . "优化 trace 分析" --agent --trace-out artifacts/agent_run.json
+python main.py . "优化 trace 分析" --agent --agent-memory artifacts/agent_memory.jsonl
+```
+
+Agent 默认记忆路径是 `artifacts/agent_memory.jsonl`。每条记忆会记录任务、状态、摘要、相关文件和关键决策；下一次 Agent 运行会按任务相关性读取近期记忆。相同任务和相同文件集合的记忆会自动跳过，避免重复污染记忆库。
+
+Agent 输出默认包含“Agent 运行轨迹”，展示每一步的状态和关键产物；加上 `--show-trace` 后，还会显示更详细的 RAG 检索轨迹。Agent 还会生成任务画像，例如 `feature`、`bugfix`、`optimization`、`evaluation`、`docs`、`test`，并据此给出更贴近任务类型的验证命令。
+
+当前 Agent 工作流：
+
+1. 接收任务：抽取目标、约束和交付物。
+2. 读取记忆：检索历史任务中的相关文件、决策和踩坑。
+3. 检索上下文：用 Hybrid Search 找代码块，并召回相邻上下文。
+4. 规划修改：生成候选文件、执行步骤和风险点。
+5. 生成草案：未启用 LLM 时输出离线计划；启用 LLM 时生成实施草案。
+6. 验证建议：给出应运行的测试、编译和评测。
+7. 写入记忆：把本次任务摘要和决策保存为长期记忆。
+
 ## 桌面界面
 
 如果想用图形界面调整参数和查看结果：
@@ -145,6 +185,8 @@ python scripts/retrieval_eval.py . datasets/eval/trace.jsonl --top-k 5 --trace-o
 ```bash
 python scripts/retrieval_eval.py . datasets/eval/sample_evalset.json --trace-out artifacts/retrieval_trace.jsonl
 ```
+
+Trace 中会包含 `trajectory` 字段，用来观察 `initial_search`、`neighbor_recall`、`final_filter` 和 `context_compaction` 四个阶段的文件、行号、分数、来源和预览文本。单次查询也可以用 `main.py --show-trace` 直接打印可读轨迹。
 
 执行 bad case 归因和参数搜索：
 
