@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from coding_rag.bm25_retriever import BM25Retriever, SearchResult
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult
 
 
 def filter_recalled_results(

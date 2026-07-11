@@ -5,5 +5,6 @@
 - `retrieval_trace.jsonl`
 - `trace_eval_trace.jsonl`
 - `ui_retrieval_trace.jsonl`
+- `agent_run_log.jsonl`
 
 这些 JSONL 文件通常体积较大且可重复生成，已在 `.gitignore` 中忽略。

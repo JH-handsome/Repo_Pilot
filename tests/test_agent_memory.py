@@ -2,7 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from coding_rag.agent_memory import AgentMemoryStore, build_memory
+from coding_rag.agent.memory import AgentMemoryStore, build_memory
 
 
 class AgentMemoryStoreTest(unittest.TestCase):
@@ -12,18 +12,18 @@ class AgentMemoryStoreTest(unittest.TestCase):
             store = AgentMemoryStore(memory_path)
             store.append(
                 build_memory(
-                    task="实现 Hybrid Search",
+                    task="implement Hybrid Search",
                     status="done",
-                    summary="增加 Hybrid Search 检索模式",
-                    files=["coding_rag/bm25_retriever.py"],
-                    decisions=["融合正文和元数据分数"],
+                    summary="Add Hybrid Search retrieval mode",
+                    files=["coding_rag/tools/bm25.py"],
+                    decisions=["combine text and metadata scores"],
                 )
             )
 
-            results = store.search("Hybrid Search 检索怎么优化", limit=1)
+            results = store.search("How to optimize Hybrid Search retrieval", limit=1)
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].files, ["coding_rag/bm25_retriever.py"])
+        self.assertEqual(results[0].files, ["coding_rag/tools/bm25.py"])
 
     def test_missing_memory_file_returns_empty_list(self):
         with TemporaryDirectory() as temp_dir:
@@ -32,12 +32,27 @@ class AgentMemoryStoreTest(unittest.TestCase):
             self.assertEqual(store.load_all(), [])
             self.assertEqual(store.search("anything"), [])
 
+    def test_load_memory_accepts_utf8_bom(self):
+        with TemporaryDirectory() as temp_dir:
+            memory_path = Path(temp_dir) / "agent_memory.jsonl"
+            memory_path.write_text(
+                '\ufeff{"id":"agent-1","created_at":"2026-06-03T00:00:00+00:00",'
+                '"task":"test","status":"planned","summary":"summary","files":[],"decisions":[]}\n',
+                encoding="utf-8",
+            )
+            store = AgentMemoryStore(memory_path)
+
+            memories = store.load_all()
+
+            self.assertEqual(len(memories), 1)
+            self.assertEqual(memories[0].task, "test")
+
     def test_append_if_new_skips_duplicate_memory(self):
         with TemporaryDirectory() as temp_dir:
             memory_path = Path(temp_dir) / "agent_memory.jsonl"
             store = AgentMemoryStore(memory_path)
             memory = build_memory(
-                task="同一个任务",
+                task="same task",
                 status="planned",
                 summary="summary",
                 files=["a.py"],

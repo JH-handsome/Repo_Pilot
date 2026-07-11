@@ -10,10 +10,10 @@
 
 from typing import TYPE_CHECKING
 
-from coding_rag.llm_client import LLMConfig, OpenAICompatibleChatClient
+from coding_rag.rag.llm_client import LLMConfig, OpenAICompatibleChatClient
 
-from rag.citation_validator import append_citation_validation_report, validate_answer_citations
-from rag.prompt import (
+from coding_rag.rag.citation_validator import append_citation_validation_report, validate_answer_citations
+from coding_rag.rag.prompt import (
     GenerationMode,
     build_user_prompt,
     format_results_as_context,
@@ -21,7 +21,7 @@ from rag.prompt import (
 )
 
 if TYPE_CHECKING:
-    from coding_rag.bm25_retriever import SearchResult
+    from coding_rag.tools.bm25 import SearchResult
 
 
 class AnswerGenerator:
@@ -131,7 +131,7 @@ def build_generator(
     Raises:
         ValueError: 缺少必要的配置
     """
-    from coding_rag.llm_client import build_llm_config
+    from coding_rag.rag.llm_client import build_llm_config
 
     config = build_llm_config(
         provider=provider,

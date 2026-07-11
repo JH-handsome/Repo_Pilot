@@ -1,9 +1,9 @@
-import unittest
+﻿import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from coding_rag.bm25_retriever import SearchResult
-from coding_rag.code_splitter import CodeChunk
+from coding_rag.tools.bm25 import SearchResult
+from coding_rag.repository.chunks import CodeChunk
 from scripts.retrieval_eval import (
     EvalCase,
     aggregate_stage_diagnostics,
@@ -258,6 +258,29 @@ class RetrievalEvalPathMatchingTest(unittest.TestCase):
         self.assertIn("missing_in_initial_search: 1", report)
         self.assertIn("bad_case_ids: q002, q003", report)
         self.assertIn("context_over_threshold: q002", report)
+
+    def test_stage_diagnostics_reads_context_from_unified_trace_artifacts(self):
+        summary = aggregate_stage_diagnostics(
+            [{"id": "q001", "diagnosis": "hit_final_top_k"}],
+            [
+                {
+                    "id": "q001",
+                    "trajectory": {
+                        "trace_version": "1.0",
+                        "artifacts": {
+                            "retrieval": {
+                                "context_compaction": [
+                                    {"file": "a.py", "char_count": 42},
+                                ]
+                            }
+                        },
+                    },
+                }
+            ],
+            context_char_warning=100,
+        )
+
+        self.assertEqual(summary["context"]["max_chars"], 42)
 
     def test_optimization_report_is_reusable_by_cli_and_ui(self):
         best = {"chunk_size": 40, "overlap": 5, "recall_window": 1, "mrr": 0.75}

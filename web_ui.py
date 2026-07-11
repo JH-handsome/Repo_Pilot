@@ -1,4 +1,4 @@
-"""RepoPilot 桌面前端窗口（Tkinter）。"""
+﻿"""RepoPilot Tkinter desktop UI."""
 
 from __future__ import annotations
 
@@ -8,13 +8,14 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from coding_rag.bm25_retriever import BM25Retriever, SearchResult
-from coding_rag.code_splitter import split_python_files
-from coding_rag.context_recaller import expand_with_neighbor_chunks
-from coding_rag.env_loader import ensure_dotenv, load_dotenv
-from coding_rag.file_loader import load_python_files
-from coding_rag.result_filter import filter_recalled_results
-from main import run_answer_generator
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult
+from coding_rag.repository.chunks import split_python_files
+from coding_rag.tools.recall import expand_with_neighbor_chunks
+from coding_rag.tools.env import ensure_dotenv, load_dotenv
+from coding_rag.repository.files import load_python_files
+from coding_rag.rag.answer_generator import build_generator
+from coding_rag.rag.prompt import GenerationMode
+from coding_rag.tools.filter import filter_recalled_results
 from scripts.retrieval_eval import (
     aggregate_stage_diagnostics,
     analyze_bad_case,
@@ -32,11 +33,11 @@ from scripts.retrieval_eval import (
     write_jsonl,
     render_stage_diagnostics_summary,
 )
-from rag.trace import build_retrieval_trace, render_trace_report
+from coding_rag.rag.trace import build_retrieval_trace, get_retrieval_stages, render_trace_report
 
 
 class RepoPilotUI:
-    """简单的桌面 GUI，便于交互式使用提示词和 RAG 检索流程。"""
+    """Simple desktop UI for interactive RAG search and evals."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -68,7 +69,7 @@ class RepoPilotUI:
         ttk.Entry(controls, textvariable=self.repo_path_var, width=72).grid(row=0, column=1, padx=8)
         ttk.Button(controls, text="选择目录", command=self._pick_repo_path).grid(row=0, column=2)
 
-        ttk.Label(controls, text="问题 / 提示词").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(controls, text="Question / prompt").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
         ttk.Entry(controls, textvariable=self.query_var, width=72).grid(row=1, column=1, padx=8, pady=(8, 0))
 
         numeric = ttk.Frame(self.root, padding=(10, 0, 10, 0))
@@ -93,7 +94,7 @@ class RepoPilotUI:
             state="readonly",
             width=18,
         ).grid(row=0, column=2)
-        ttk.Label(llm_bar, text="提供商").grid(row=0, column=3, padx=(10, 3))
+        ttk.Label(llm_bar, text="Provider").grid(row=0, column=3, padx=(10, 3))
         ttk.Combobox(
             llm_bar,
             textvariable=self.provider_var,
@@ -104,8 +105,8 @@ class RepoPilotUI:
 
         run_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
         run_bar.pack(fill=tk.X)
-        ttk.Button(run_bar, text="开始检索", command=self._run_async).pack(side=tk.LEFT)
-        ttk.Button(run_bar, text="开始评测", command=self._run_eval_async).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(run_bar, text="Run search", command=self._run_async).pack(side=tk.LEFT)
+        ttk.Button(run_bar, text="Run eval", command=self._run_eval_async).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(run_bar, text="导出 Trace", command=self._export_last_trace).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(run_bar, text="Bad Case 面板", command=self._show_bad_cases).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(run_bar, text="自动调参", command=self._optimize_async).pack(side=tk.LEFT, padx=(8, 0))
@@ -113,9 +114,9 @@ class RepoPilotUI:
 
         eval_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
         eval_bar.pack(fill=tk.X)
-        ttk.Label(eval_bar, text="评测集").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(eval_bar, text="Eval set").grid(row=0, column=0, sticky=tk.W)
         ttk.Entry(eval_bar, textvariable=self.evalset_path_var, width=72).grid(row=0, column=1, padx=8)
-        ttk.Button(eval_bar, text="选择评测集", command=self._pick_evalset).grid(row=0, column=2)
+        ttk.Button(eval_bar, text="Choose eval set", command=self._pick_evalset).grid(row=0, column=2)
 
         output_frame = ttk.Frame(self.root, padding=10)
         output_frame.pack(fill=tk.BOTH, expand=True)
@@ -132,7 +133,7 @@ class RepoPilotUI:
 
     def _run_async(self) -> None:
         if not self.query_var.get().strip():
-            messagebox.showwarning("输入不完整", "请先输入问题或提示词。")
+            messagebox.showwarning("Incomplete input", "Enter a question or prompt first.")
             return
 
         thread = threading.Thread(target=self._run_pipeline, daemon=True)
@@ -152,8 +153,8 @@ class RepoPilotUI:
                 overlap=self.overlap_var.get(),
             )
             if not chunks:
-                self._set_output("未找到 Python 代码块，请检查路径是否正确。")
-                self._set_status("未找到代码")
+                self._set_output("No Python code chunks found. Check the repository path.")
+                self._set_status("No code found")
                 return
 
             retriever = BM25Retriever(chunks)
@@ -193,20 +194,13 @@ class RepoPilotUI:
             if self.use_llm_var.get():
                 ensure_dotenv()
                 load_dotenv()
-                args = type("Args", (), {
-                    "query": query,
-                    "mode": self.mode_var.get(),
-                    "llm_provider": self.provider_var.get(),
-                    "llm_model": None,
-                    "llm_base_url": None,
-                    "llm_api_key_env": None,
-                    "llm_timeout": 60,
-                    "llm_max_tokens": 2000,
-                    "llm_temperature": None,
-                    "llm_context_chars": 12000,
-                })
-                answer = run_answer_generator(args, results)
-                lines.extend(["", "=" * 80, f"LLM 结果（{self.mode_var.get()}）", "-" * 80, answer.strip()])
+                generator = build_generator(
+                    provider=self.provider_var.get(),
+                    mode=GenerationMode(self.mode_var.get()),
+                    max_context_chars=12000,
+                )
+                answer = generator.generate(query, results)
+                lines.extend(["", "=" * 80, f"LLM result ({self.mode_var.get()})", "-" * 80, answer.strip()])
 
             self._set_output("\n".join(lines))
             self._set_status("完成")
@@ -217,8 +211,8 @@ class RepoPilotUI:
 
     def _pick_evalset(self) -> None:
         selected = filedialog.askopenfilename(
-            title="选择评测集",
-            filetypes=[("评测集", "*.json *.jsonl"), ("JSON", "*.json"), ("JSONL", "*.jsonl")],
+            title="Choose eval set",
+            filetypes=[("Eval set", "*.json *.jsonl"), ("JSON", "*.json"), ("JSONL", "*.jsonl")],
         )
         if selected:
             self.evalset_path_var.set(selected)
@@ -263,16 +257,17 @@ class RepoPilotUI:
                         "recall_window": self.recall_window_var.get(),
                     },
                 )
+                stages = get_retrieval_stages(trajectory)
                 row = {
                     "id": case.id,
                     "query": case.query,
                     "metrics": {"rr": rr, "recall_at_k": rec, "hit_count": hits},
                     "bad_case": bad,
                     "trajectory": trajectory,
-                    "seed": trajectory["stages"]["initial_search"],
-                    "recalled": trajectory["stages"]["neighbor_recall"],
-                    "final": trajectory["stages"]["final_filter"],
-                    "context": trajectory["stages"]["context_compaction"],
+                    "seed": stages["initial_search"],
+                    "recalled": stages["neighbor_recall"],
+                    "final": stages["final_filter"],
+                    "context": stages["context_compaction"],
                 }
                 if self.use_llm_var.get():
                     row["llm"] = generate_eval_answer(generator, llm_setup_error, case.query, final)
@@ -298,22 +293,22 @@ class RepoPilotUI:
 
     def _export_last_trace(self) -> None:
         if not self.last_trace_path or not self.last_trace_path.exists():
-            messagebox.showwarning("无 Trace", "请先点击“开始评测”生成 Trace。")
+            messagebox.showwarning("No trace", "Run eval first to generate a trace.")
             return
         target = filedialog.asksaveasfilename(title="保存 Trace", defaultextension=".jsonl", filetypes=[("JSONL", "*.jsonl")])
         if not target:
             return
         Path(target).write_text(self.last_trace_path.read_text(encoding="utf-8"), encoding="utf-8")
-        self._set_status("Trace 已导出")
+        self._set_status("Trace exported")
 
     def _show_bad_cases(self) -> None:
         if not self.last_trace_path or not self.last_trace_path.exists():
-            messagebox.showwarning("无数据", "请先点击“开始评测”。")
+            messagebox.showwarning("No data", "Run eval first.")
             return
         rows = [json.loads(line) for line in self.last_trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         bad = [r for r in rows if not r["bad_case"]["final_hit"]]
         if not bad:
-            self._set_output("没有 bad case。")
+            self._set_output("No bad cases.")
             return
         blocks = []
         for r in bad:
@@ -389,7 +384,7 @@ class RepoPilotUI:
             if llm.get("error"):
                 lines.append(f"LLM 调用失败: {llm['error']}")
             else:
-                lines.append((llm.get("answer") or "").strip() or "LLM 输出为空。")
+                lines.append((llm.get("answer") or "").strip() or "LLM output is empty.")
 
         return "\n".join(lines)
 
@@ -429,5 +424,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     if not Path("main.py").exists():
-        raise SystemExit("请在项目根目录运行: python web_ui.py")
+        raise SystemExit("请在项目根目录运行 python web_ui.py")
     main()

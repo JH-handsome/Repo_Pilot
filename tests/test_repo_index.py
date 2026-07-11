@@ -1,8 +1,8 @@
-from pathlib import Path
+﻿from pathlib import Path
 import unittest
 
-from coding_rag.code_splitter import CodeChunk
-from coding_rag.repo_index import build_repo_index
+from coding_rag.repository.chunks import CodeChunk
+from coding_rag.repository.index import build_repo_index
 
 
 class RepoIndexTest(unittest.TestCase):

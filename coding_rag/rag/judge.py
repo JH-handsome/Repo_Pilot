@@ -1,15 +1,15 @@
 """旧版 LLM 判断器。
 
 新代码默认使用 `rag.answer_generator.AnswerGenerator`。这个模块保留给
-`main.py --legacy-judge`，用于兼容最早的“检索结果相关性判断”流程。
+`main.py --legacy-judge`，用于兼容最早的 `检索结果相关性判断` 流程。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from coding_rag.bm25_retriever import SearchResult
-from coding_rag.llm_client import OpenAICompatibleChatClient
+from coding_rag.rag.llm_client import OpenAICompatibleChatClient
+from coding_rag.tools.bm25 import SearchResult
 
 
 SYSTEM_PROMPT = """你是一个严谨的代码搜索判断助手。
@@ -23,7 +23,7 @@ SYSTEM_PROMPT = """你是一个严谨的代码搜索判断助手。
 规则：
 - 不要虚构代码块中没有出现的文件、函数或行为。
 - 引用有用代码块时，使用 path:start-end 格式标出文件和行号。
-- 如果证据不足，请说明“无法在检索到的代码中找到答案”。
+- 如果证据不足，请说明 "无法在检索到的代码中找到答案"。
 - 使用与用户问题相同的语言回答。
 """
 

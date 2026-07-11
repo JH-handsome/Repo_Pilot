@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from coding_rag.agent_memory import AgentMemory, AgentMemoryStore, build_memory
-from coding_rag.bm25_retriever import BM25Retriever, SearchResult, is_test_path
-from coding_rag.code_splitter import split_python_files
-from coding_rag.context_recaller import expand_with_neighbor_chunks
-from coding_rag.file_loader import load_python_files
-from coding_rag.result_filter import filter_recalled_results
-from rag.prompt import format_results_as_context
-from rag.trace import build_retrieval_trace, render_trace_report
+from coding_rag.agent.memory import AgentMemory, AgentMemoryStore, build_memory
+from coding_rag.repository.chunks import split_python_files
+from coding_rag.repository.files import load_python_files
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult, is_test_path
+from coding_rag.tools.filter import filter_recalled_results
+from coding_rag.tools.recall import expand_with_neighbor_chunks
+from coding_rag.rag.prompt import format_results_as_context
+from coding_rag.rag.trace import build_agent_events, build_trace_run, build_retrieval_trace, render_trace_report
 
 
 AGENT_WORKFLOW: list[tuple[str, str]] = [
@@ -21,7 +22,7 @@ AGENT_WORKFLOW: list[tuple[str, str]] = [
     ("load_memory", "读取历史任务记忆，找出相关决策、踩坑和常用文件。"),
     ("retrieve_context", "用 Hybrid Search 检索相关代码，并召回邻近上下文。"),
     ("plan_changes", "基于上下文生成修改计划，明确候选文件、步骤和风险。"),
-    ("implement", "按计划生成实现草案；启用 LLM 时产出更具体的改动方案。"),
+    ("implement", "生成交给 Claude Code 的实现草案；RepoPilot 不直接修改代码。"),
     ("verify", "给出需要运行的测试、评测和人工检查点。"),
     ("remember", "把任务摘要、相关文件和关键决策写入长期记忆。"),
 ]
@@ -45,7 +46,10 @@ class CodeAgentConfig:
     min_final_score: float | None = None
     memory_path: str | Path = "artifacts/agent_memory.jsonl"
     memory_limit: int = 5
+    run_log_path: str | Path | None = None
     max_context_chars: int = 12000
+    dry_run: bool = False
+    safe_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,8 @@ class AgentRun:
     implementation: str
     memory: AgentMemory
     memory_written: bool
+    run_log_path: str | None
+    run_log_written: bool
 
 
 def run_code_agent(
@@ -97,7 +103,8 @@ def run_code_agent(
         files=prioritized_result_files(final_results),
         decisions=build_memory_decisions(config, client is not None, task_profile),
     )
-    memory_written = memory_store.append_if_new(memory)
+    skip_writes = config.dry_run or config.safe_mode
+    memory_written = False if skip_writes else memory_store.append_if_new(memory)
     agent_trace = build_agent_step_trace(
         task=task,
         task_profile=task_profile,
@@ -113,7 +120,7 @@ def run_code_agent(
         used_llm=client is not None,
     )
 
-    return AgentRun(
+    run = AgentRun(
         task=task,
         workflow=workflow_as_dicts(),
         task_profile=task_profile,
@@ -127,7 +134,13 @@ def run_code_agent(
         implementation=implementation,
         memory=memory,
         memory_written=memory_written,
+        run_log_path=str(config.run_log_path) if config.run_log_path else None,
+        run_log_written=False,
     )
+    if config.run_log_path and not skip_writes:
+        append_agent_run_log(config.run_log_path, run)
+        run = replace(run, run_log_written=True)
+    return run
 
 
 def retrieve_agent_context(
@@ -212,7 +225,8 @@ def build_agent_plan(
             "2. 在最小必要文件内实现功能，避免无关重构。",
             "3. 为新增行为补单元测试或评测样例。",
             "4. 运行相关测试、编译检查和必要的检索评测。",
-            "5. 将结果、风险和后续优化点写入记忆。",
+            "5. 把实现任务交给 Claude Code 执行，RepoPilot 只保留计划、证据和验证建议。",
+            "6. 将结果、风险和后续优化点写入记忆与运行日志。",
             "",
             "## 建议验证命令",
         ]
@@ -247,7 +261,7 @@ def build_agent_messages(
 要求：
 1. 严格基于提供的代码上下文和记忆，不要编造文件或 API。
 2. 优先最小改动，遵循现有项目结构和风格。
-3. 输出必须包含：任务理解、候选文件、实施计划、代码修改建议、测试计划、风险。
+3. 输出必须包含：任务理解、候选文件、交给 Claude Code 的实施计划、代码修改建议、测试计划、风险。
 4. 如果证据不足，明确说明还需要读取哪些文件。"""
     user_prompt = f"""## 用户任务
 {task}
@@ -264,7 +278,7 @@ def build_agent_messages(
 ## 检索上下文
 {context}
 
-请给出可执行的代码 Agent 实施草案。"""
+请给出可交给 Claude Code 执行的实施草案。"""
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -289,6 +303,7 @@ def render_agent_run(run: AgentRun, *, show_trace: bool = True) -> str:
         f"- written: {run.memory_written}",
         f"- summary: {run.memory.summary}",
         f"- files: {', '.join(run.memory.files) if run.memory.files else '(none)'}",
+        f"- run_log: {run.run_log_path if run.run_log_written else '(not written)'}",
     ]
     if show_trace:
         lines.extend(["", render_trace_report(run.trace, limit=8)])
@@ -296,18 +311,72 @@ def render_agent_run(run: AgentRun, *, show_trace: bool = True) -> str:
 
 
 def agent_run_to_dict(run: AgentRun) -> dict:
+    trace_unified = build_agent_run_trace(run)
     return {
         "task": run.task,
         "workflow": run.workflow,
         "task_profile": run.task_profile.__dict__,
         "agent_trace": run.agent_trace,
+        "trace_unified": trace_unified,
         "memories": [memory.__dict__ for memory in run.memories],
         "trace": run.trace,
         "plan": run.plan,
         "implementation": run.implementation,
         "memory": run.memory.__dict__,
         "memory_written": run.memory_written,
+        "run_log_path": run.run_log_path,
+        "run_log_written": run.run_log_written,
     }
+
+
+def build_agent_run_trace(run: AgentRun) -> dict:
+    flags = {
+        "llm": run.agent_trace[4]["artifacts"].get("used_llm", False) if len(run.agent_trace) > 4 else False,
+        "dry_run": any((item.get("artifacts") or {}).get("dry_run") for item in run.agent_trace),
+        "safe_mode": any((item.get("artifacts") or {}).get("safe_mode") for item in run.agent_trace),
+    }
+    summary = {
+        "seed_count": len(run.seed_results),
+        "recalled_count": len(run.recalled_results),
+        "final_count": len(run.final_results),
+        "memory_written": run.memory_written,
+        "run_log_written": run.run_log_written,
+        "candidate_files": prioritized_result_files(run.final_results),
+    }
+    status = "dry_run" if flags["dry_run"] or flags["safe_mode"] else "success"
+    return {
+        "trace_version": "1.0",
+        "run": build_trace_run(
+            mode="agent_exec",
+            task=run.task,
+            status=status,
+            flags=flags,
+            summary=summary,
+        ),
+        "events": build_agent_events(run.agent_trace),
+        "artifacts": {
+            "retrieval": (run.trace.get("artifacts") or {}).get("retrieval", run.trace.get("stages", {})),
+            "agent": {
+                "agent_trace": run.agent_trace,
+                "task_profile": run.task_profile.__dict__,
+                "memory": run.memory.__dict__,
+            },
+            "tools": [],
+        },
+        "agent_trace": run.agent_trace,
+        "summary": summary,
+    }
+
+
+def append_agent_run_log(path: str | Path, run: AgentRun) -> None:
+    """追加 Agent 单次运行日志；不同于长期记忆，日志保留完整运行环节。"""
+    log_path = Path(path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    record = agent_run_to_dict(run)
+    record["log_type"] = "agent_run"
+    record["run_log_written"] = True
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def workflow_as_dicts() -> list[dict[str, str]]:
@@ -329,6 +398,16 @@ def build_agent_step_trace(
     used_llm: bool,
 ) -> list[dict]:
     files = prioritized_result_files(final_results)
+    skip_writes = config.dry_run or config.safe_mode
+    remember_detail = (
+        "dry-run/safe mode enabled; memory and run log writes were skipped."
+        if skip_writes
+        else (
+            "已把本次任务摘要、相关文件和关键决策写入长期记忆。"
+            if memory_written
+            else "检测到相同任务和文件集合，跳过重复记忆写入。"
+        )
+    )
     return [
         {
             "step": "receive_task",
@@ -374,7 +453,7 @@ def build_agent_step_trace(
         {
             "step": "implement",
             "status": "drafted" if used_llm else "planned",
-            "detail": "已调用 LLM 生成实现草案。" if used_llm else "未启用 LLM，输出离线实施说明。",
+            "detail": "已调用 LLM 生成交给 Claude Code 的实现草案。" if used_llm else "未启用 LLM，输出交给 Claude Code 的离线实施说明。",
             "artifacts": {
                 "used_llm": used_llm,
                 "implementation_chars": len(implementation),
@@ -391,11 +470,13 @@ def build_agent_step_trace(
         {
             "step": "remember",
             "status": "done" if memory_written else "skipped",
-            "detail": "已把本次任务摘要、相关文件和关键决策写入长期记忆。" if memory_written else "检测到相同任务和文件集合，跳过重复记忆写入。",
+            "detail": remember_detail,
             "artifacts": {
                 "memory_id": memory.id,
                 "memory_path": str(config.memory_path),
                 "memory_written": memory_written,
+                "dry_run": config.dry_run,
+                "safe_mode": config.safe_mode,
                 "summary": memory.summary,
             },
         },
@@ -423,6 +504,8 @@ def summarize_trace_artifacts(artifacts: dict) -> str:
         "candidate_file_count",
         "used_llm",
         "memory_written",
+        "dry_run",
+        "safe_mode",
         "memory_id",
     ):
         if key in artifacts:
@@ -436,7 +519,7 @@ def summarize_trace_artifacts(artifacts: dict) -> str:
 def build_memory_summary(task: str, results: list[SearchResult]) -> str:
     files = prioritized_result_files(results)
     file_text = ", ".join(files[:3]) if files else "no files"
-    return f"任务“{task}”定位到 {file_text}"
+    return f"任务 \"{task}\" 定位到 {file_text}"
 
 
 def prioritized_result_files(results: list[SearchResult]) -> list[str]:
@@ -456,7 +539,7 @@ def build_memory_decisions(config: CodeAgentConfig, used_llm: bool, task_profile
 def build_offline_implementation_note() -> str:
     return (
         "未启用 LLM，因此本次 Agent 不生成具体代码补丁。"
-        "请使用上方计划和候选文件继续实现，或追加 `--llm` 让 Agent 生成更详细的实现草案。"
+        "请把上方计划和候选文件交给 Claude Code 继续实现，或追加 `--llm` 让 Agent 生成更详细的实施草案。"
     )
 
 

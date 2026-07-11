@@ -1,8 +1,8 @@
-import unittest
+﻿import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from coding_rag.file_loader import load_python_files, should_skip
+from coding_rag.repository.files import load_python_files, should_skip
 
 
 class FileLoaderIgnoreTest(unittest.TestCase):

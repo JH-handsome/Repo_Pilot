@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import unittest
 
 from coding_rag.agent import CodeAgentConfig, analyze_task, agent_run_to_dict, render_agent_run, run_code_agent
@@ -39,6 +40,7 @@ class CodeAgentTest(unittest.TestCase):
             rendered = render_agent_run(run, show_trace=False)
             self.assertIn("Agent 运行轨迹", rendered)
             self.assertIn("retrieve_context", rendered)
+            self.assertFalse(run.run_log_written)
 
     def test_agent_uses_relevant_memory_and_llm_client(self):
         with TemporaryDirectory() as temp_dir:
@@ -64,7 +66,57 @@ class CodeAgentTest(unittest.TestCase):
             payload = agent_run_to_dict(run)
             self.assertIn("task_profile", payload)
             self.assertIn("agent_trace", payload)
+            self.assertIn("trace_unified", payload)
             self.assertEqual(payload["agent_trace"][-1]["step"], "remember")
+            self.assertEqual(payload["trace_unified"]["trace_version"], "1.0")
+            self.assertEqual(payload["trace_unified"]["run"]["mode"], "agent_exec")
+            self.assertEqual(payload["trace_unified"]["events"][0]["step"], "receive_task")
+
+    def test_agent_writes_run_log_to_separate_file(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app.py").write_text("def patch_target():\n    return True\n", encoding="utf-8")
+            memory_path = root / "agent_memory.jsonl"
+            log_path = root / "agent_run_log.jsonl"
+
+            run = run_code_agent(
+                "记录 agent 运行环节",
+                CodeAgentConfig(repo_path=str(root), top_k=1, memory_path=memory_path, run_log_path=log_path),
+            )
+
+            self.assertTrue(run.run_log_written)
+            self.assertEqual(run.run_log_path, str(log_path))
+            rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["log_type"], "agent_run")
+            self.assertTrue(rows[0]["run_log_written"])
+            self.assertEqual(rows[0]["agent_trace"][0]["step"], "receive_task")
+            self.assertEqual(rows[0]["agent_trace"][-1]["step"], "remember")
+
+    def test_agent_dry_run_skips_memory_and_run_log_writes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app.py").write_text("def patch_target():\n    return True\n", encoding="utf-8")
+            memory_path = root / "agent_memory.jsonl"
+            log_path = root / "agent_run_log.jsonl"
+
+            run = run_code_agent(
+                "修复 patch_target 的返回值",
+                CodeAgentConfig(
+                    repo_path=str(root),
+                    top_k=1,
+                    memory_path=memory_path,
+                    run_log_path=log_path,
+                    dry_run=True,
+                ),
+            )
+
+            self.assertFalse(run.memory_written)
+            self.assertFalse(run.run_log_written)
+            self.assertFalse(memory_path.exists())
+            self.assertFalse(log_path.exists())
+            self.assertEqual(run.agent_trace[-1]["status"], "skipped")
+            self.assertTrue(run.agent_trace[-1]["artifacts"]["dry_run"])
 
     def test_agent_skips_duplicate_memory(self):
         with TemporaryDirectory() as temp_dir:

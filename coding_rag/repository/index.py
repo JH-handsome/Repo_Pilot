@@ -6,7 +6,7 @@ import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from coding_rag.code_splitter import CodeChunk
+from coding_rag.repository.chunks import CodeChunk
 
 
 CALL_INTENT_TOKENS = {"call", "caller", "callee"}

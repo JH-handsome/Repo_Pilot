@@ -8,8 +8,8 @@ from __future__ import annotations
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-from coding_rag.bm25_retriever import SearchResult
-from coding_rag.code_splitter import CodeChunk
+from coding_rag.repository.chunks import CodeChunk
+from coding_rag.tools.bm25 import SearchResult
 
 
 def expand_with_neighbor_chunks(

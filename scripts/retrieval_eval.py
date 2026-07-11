@@ -1,4 +1,4 @@
-"""检索评测、Trace 保存、Bad Case 归因、参数优化脚本。"""
+﻿"""Retrieval evaluation, trace export, bad-case analysis, and tuning."""
 
 from __future__ import annotations
 
@@ -13,16 +13,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from coding_rag.bm25_retriever import BM25Retriever, SearchResult
-from coding_rag.code_splitter import split_python_files
-from coding_rag.context_recaller import expand_with_neighbor_chunks
-from coding_rag.env_loader import ensure_dotenv, load_dotenv
-from coding_rag.file_loader import load_python_files
-from coding_rag.llm_client import available_provider_names
-from coding_rag.result_filter import filter_recalled_results
-from rag.answer_generator import AnswerGenerator, build_generator
-from rag.prompt import GenerationMode
-from rag.trace import build_retrieval_trace
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult
+from coding_rag.repository.chunks import split_python_files
+from coding_rag.tools.recall import expand_with_neighbor_chunks
+from coding_rag.tools.env import ensure_dotenv, load_dotenv
+from coding_rag.repository.files import load_python_files
+from coding_rag.rag.llm_client import available_provider_names
+from coding_rag.tools.filter import filter_recalled_results
+from coding_rag.rag.answer_generator import AnswerGenerator, build_generator
+from coding_rag.rag.prompt import GenerationMode
+from coding_rag.rag.trace import build_retrieval_trace, get_retrieval_stages
 
 
 @dataclass
@@ -348,7 +348,7 @@ def context_char_totals(trace_rows: list[dict]) -> list[int]:
     for row in trace_rows:
         context_blocks = row.get("context")
         if context_blocks is None:
-            context_blocks = row.get("trajectory", {}).get("stages", {}).get("context_compaction", [])
+            context_blocks = get_retrieval_stages(row.get("trajectory", {})).get("context_compaction", [])
 
         total = 0
         for block in context_blocks:
@@ -505,16 +505,17 @@ def run_eval(args: argparse.Namespace) -> int:
                 "recall_window": args.recall_window,
             },
         )
+        stages = get_retrieval_stages(trajectory)
         record = {
             "id": case.id,
             "query": case.query,
             "metrics": {"rr": rr, "recall_at_k": recall_at_k, "hit_count": hit_count},
             "bad_case": bad,
             "trajectory": trajectory,
-            "seed": trajectory["stages"]["initial_search"],
-            "recalled": trajectory["stages"]["neighbor_recall"],
-            "final": trajectory["stages"]["final_filter"],
-            "context": trajectory["stages"]["context_compaction"],
+            "seed": stages["initial_search"],
+            "recalled": stages["neighbor_recall"],
+            "final": stages["final_filter"],
+            "context": stages["context_compaction"],
         }
         if args.llm:
             record["llm"] = generate_eval_answer(generator, llm_setup_error, case.query, final)
@@ -581,7 +582,7 @@ def collect_optimization_results(args: argparse.Namespace, cases: list[EvalCase]
 def render_optimization_report(rows: list[dict], best: dict | None, top_k: int) -> str:
     lines = ["=== 参数搜索（切片 / 检索）==="]
     if not rows:
-        lines.append("没有可评测的 case。")
+        lines.append("No eval cases.")
         return "\n".join(lines)
 
     for row in rows:
@@ -598,7 +599,7 @@ def render_optimization_report(rows: list[dict], best: dict | None, top_k: int) 
             f"--recall-window {best['recall_window']} "
             f"(MRR@{top_k}={best['mrr']:.4f})"
         )
-        lines.append("Prompt 优化建议: 在系统提示里强制‘先相关块列表，后答案；证据不足时明确拒答’。")
+        lines.append("Prompt suggestion: list relevant chunks first, then answer; refuse when evidence is insufficient.")
 
     return "\n".join(lines)
 
@@ -615,13 +616,13 @@ def print_llm_outputs(rows: list[dict]) -> None:
         elif answer:
             print(answer)
         else:
-            print("LLM 输出为空。")
+            print("LLM output is empty.")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="检索评测与优化脚本")
     parser.add_argument("repo_path")
-    parser.add_argument("evalset", help="评测集 JSON 路径，格式: [{id,query,relevant:[file_path,...]}]")
+    parser.add_argument("evalset", help="评测集 JSON 路径，格式 [{id,query,relevant:[file_path,...]}]")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--chunk-size", type=int, default=40)
     parser.add_argument("--overlap", type=int, default=5)

@@ -5,9 +5,9 @@ import re
 
 from rank_bm25 import BM25Okapi
 
-from coding_rag.code_splitter import CodeChunk
-from coding_rag.repo_index import RepoIndex, build_repo_index
-from coding_rag.tokenizer import CodeTokenizer
+from coding_rag.repository.chunks import CodeChunk
+from coding_rag.repository.index import RepoIndex, build_repo_index
+from coding_rag.tools.tokenizer import CodeTokenizer
 
 
 SYMBOL_LINE_RE = re.compile(r"^\s*(class|def|async\s+def)\s+([A-Za-z_][A-Za-z_0-9]*)", re.MULTILINE)

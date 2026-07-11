@@ -11,3 +11,4 @@ datasets/leetcode-python/
 artifacts/*.jsonl
 artifacts/*.json
 data/indexes/
+data/repos/

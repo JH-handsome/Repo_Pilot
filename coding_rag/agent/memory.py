@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from coding_rag.tokenizer import CodeTokenizer
+from coding_rag.tools.tokenizer import CodeTokenizer
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class AgentMemoryStore:
             return []
 
         memories: list[AgentMemory] = []
-        for line_number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), start=1):
+        for line_number, line in enumerate(self.path.read_text(encoding="utf-8-sig").splitlines(), start=1):
             if not line.strip():
                 continue
             try:

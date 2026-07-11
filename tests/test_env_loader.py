@@ -1,10 +1,10 @@
-import os
+﻿import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from coding_rag.env_loader import ensure_dotenv, load_dotenv, parse_env_line
+from coding_rag.tools.env import ensure_dotenv, load_dotenv, parse_env_line
 
 
 class EnvLoaderTest(unittest.TestCase):

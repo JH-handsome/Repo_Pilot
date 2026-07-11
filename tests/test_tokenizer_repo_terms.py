@@ -1,6 +1,6 @@
-import unittest
+﻿import unittest
 
-from coding_rag.tokenizer import tokenize
+from coding_rag.tools.tokenizer import tokenize
 
 
 class TokenizerRepoTermsTest(unittest.TestCase):

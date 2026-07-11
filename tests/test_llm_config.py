@@ -1,8 +1,8 @@
-import os
+﻿import os
 import unittest
 from unittest.mock import patch
 
-from coding_rag.llm_client import build_llm_config, chat_completions_url
+from coding_rag.rag.llm_client import build_llm_config, chat_completions_url
 
 
 class LLMConfigTest(unittest.TestCase):

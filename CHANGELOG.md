@@ -2,6 +2,48 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-07-11
+
+- 打通 `ReActAgentInterface.run()` 最小工具调用循环，支持结构化 JSON tool call，接入 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff`，默认 dry-run，并将工具结果写入统一 trace event。
+- 新增 Agent 安全策略配置读取：支持 `.repopilot/policy.json` 和 `--agent-policy`，默认 denylist 永远保留，配置 allowlist 只扩展允许命令。
+- 统一 trace 消费侧补强：`render_trace_report()` 可渲染 Agent/tool events，浏览器前端 API 返回统一 `trace`，页面增加 Trace Events 调试入口。
+- 新增 `scripts/generate_function_map.py` 和 `scripts/agent_eval.py`，分别用于 AST 函数地图生成和 Agent 计划离线评测；补充 CLI smoke、frontend trace、Agent loop、安全策略和评测测试。
+- 删除冗余临时测试入口 `_run_tests.py`，统一使用 `python -m unittest` 运行测试。
+- 更新 `README.md` 项目结构和评测示例路径，移除已清理的顶层 `rag/`、`legacy/` 说明，改为当前 `coding_rag/agent`、`coding_rag/rag`、`coding_rag/repository`、`coding_rag/tools` 包结构。
+- 更新 `FUNCTION_MAP.md` 中 `AgentExecutor`、`AgentSafetyPolicy` 和统一 trace 相关函数说明，避免函数地图落后于当前实现。
+
+## 2026-06-04
+
+- 新增 `FUNCTION_MAP.md`：按入口、Agent、RAG、检索/仓库、脚本分组整理关键文件、类和函数职责，方便后续定位工作流。
+- 清理 `coding_rag` 根目录下仅做转发的兼容文件，调用方统一改为 `coding_rag.agent`、`coding_rag.rag`、`coding_rag.repository`、`coding_rag.tools` 下的真实模块路径；同步修复顶层 `rag/` 删除后的 import 断链。
+- 新增 `coding_rag/agent/executor.py`：提供 Agent 执行器 `read_file(path)`、`search_code(query)`、`apply_patch(diff)`、`run_command(cmd)`、`inspect_diff()`，并在 Agent 工具声明中加入可执行工具。
+- 更新 `main.py`：新增 `--agent-exec` 作为代码 Agent 执行入口，支持 `--agent-exec --llm` 生成 LLM 实施草案，新增 `--dry-run` 和 `--safe-mode` 在 Agent 执行时跳过记忆与运行日志写入。
+- 更新 `coding_rag/agent/workflow.py` 和测试：Agent 配置增加 dry-run/safe mode，无写入模式下仍完成检索、计划和可选 LLM 草案，但不产生持久化副作用。
+- 扩展 `frontend.py` 浏览器前端：新增 `POST /api/agent-plan` 端点和 `run_frontend_agent_plan` 函数；UI 新增 ASK/Agent 模式切换、Agent 计划审查开关，Agent 模式下展示 LLM 计划、工具接口、审查结果和检索统计。
+- 更新 `tests/test_frontend.py`：新增 Agent 计划端点测试，覆盖无 LLM 调用、LLM 调用、review_agent_plan 校验错误和 mock 审查链。
+- 新增 `coding_rag/agent_plan_reviewer.py`：调用 LLM 审查 Agent 计划是否合理，解析 verdict/score/issues/suggestions；CLI 新增 `--review-agent-plan`。
+- 新增 `tests/test_agent_plan_reviewer.py`，覆盖审查 prompt、JSON 解析、审查渲染和 50 条 Agent 计划测试集的审查链路。
+- 扩展 Agent 计划测试集：新增 `scripts/import_agent_plan_cases.py`，从 SWE-bench Verified 导入前 50 条任务到 `datasets/eval/agent_plan_cases.json`，并让测试校验测试集规模和计划结构。
+- 搭建 ReAct Agent 计划模式：`coding_rag/task_planner.py` 新增 `AgentPlanConfig`、`AgentToolSpec`、`AgentPlanRun` 和 `run_agent_plan_mode`，先完成任务分析、RAG 上下文检索、工具接口声明和 LLM 计划 prompt 组装，不执行工具调用。
+- 更新 `main.py`：`--workflow-mode agent` 进入新的 Agent 计划模式，`--show-agent-prompt` 可查看发给 LLM 的规划 prompt；旧版 Agent 仍通过 `--agent` 进入。
+- 新增 `datasets/eval/agent_plan_cases.json`，用于观察 Agent 计划是否覆盖关键章节和工具接口；更新 `tests/test_task_planner.py` 覆盖计划模式。
+
+## 2026-06-03
+
+- 新增 `frontend.py` 浏览器前端：访问 `http://127.0.0.1:8765` 后可输入仓库路径和问题，运行 ASK/RAG，并可勾选调用大模型回答。
+- 修复 `web_ui.py` 中对已删除 `main.run_answer_generator` 的引用，改为直接使用 `rag.answer_generator.build_generator`。
+- 新增 `tests/test_frontend.py`，覆盖浏览器前端页面控件和无 LLM 的 ASK API 返回。
+- 新增交互式入口：`python main.py` 或 `python main.py <repo_path>` 会进入连续问答模式，输入问题自动走 ASK，修改/修复类需求进入 ReAct Agent 占位。
+- 更新 `tests/test_interactive_cli.py`，覆盖无位置参数解析、立即退出和一次 ASK 交互查询。
+- 新增 `coding_rag/task_planner.py`：建立 ASK/Agent 分类模块，ASK 模式封装 RAG 检索、prompt 组装和可选 LLM 问答；Agent 模式先提供 ReAct 接口占位。
+- 更新 `main.py`：新增 `--workflow-mode auto|ask|agent`、`--show-plan` 和 `--show-ask-prompt`，普通查询默认走 ASK 工作流，旧 `--agent` 参数保留兼容。
+- 修正工作流路由：`--workflow-mode` 默认改为 `auto`，自动区分 ASK 和 ReAct Agent 占位；旧版代码 Agent 仅通过 `--agent` 显式进入。
+- 新增 `tests/test_task_planner.py`，覆盖任务分类、ASK prompt 构建、ASK 模式检索调用和 ReAct 接口占位。
+- 拆分 Agent 记忆和运行日志：`coding_rag/agent.py` 新增独立运行日志 JSONL 写入，CLI 新增 `--agent-log`，默认写入 `artifacts/agent_run_log.jsonl`。
+- 调整 Agent 分工：RepoPilot Agent 负责检索、计划、记录和验证建议，实际代码修改交给 Claude Code。
+- 精简 `AGENT.md`，仅保留基本运行规则、运行环节和记录文件；更新 `CLAUDE.md` 为 Claude Code 执行规则。
+- 更新 `tests/test_agent.py`，覆盖 Agent 运行日志单独落盘行为。
+
 ## 2026-05-30
 
 - 增强 RAG 检索：新增 `coding_rag/repo_index.py`，基于 AST 提取文件树、函数/类签名、import 和调用关系，并接入 `BM25Retriever` 的结构化 metadata 检索。

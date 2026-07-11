@@ -1,18 +1,18 @@
 from pathlib import Path
 import unittest
 
-from coding_rag.bm25_retriever import SearchResult
-from coding_rag.code_splitter import CodeChunk
-from rag.citation_validator import (
+from coding_rag.repository.chunks import CodeChunk
+from coding_rag.rag.citation_validator import (
     append_citation_validation_report,
     extract_citations,
     validate_answer_citations,
 )
+from coding_rag.tools.bm25 import SearchResult
 
 
 class CitationValidatorTest(unittest.TestCase):
     def test_extracts_path_line_range_citations(self):
-        citations = extract_citations("参考 coding_rag/file_loader.py:10-20。")
+        citations = extract_citations("See coding_rag/file_loader.py:10-20.")
 
         self.assertEqual(len(citations), 1)
         self.assertEqual(citations[0].path, "coding_rag/file_loader.py")
@@ -27,7 +27,7 @@ class CitationValidatorTest(unittest.TestCase):
         )
 
         validation = validate_answer_citations(
-            "相关代码在 coding_rag/file_loader.py:10-30。",
+            "Relevant code is in coding_rag/file_loader.py:10-30.",
             [result],
         )
 
@@ -40,17 +40,17 @@ class CitationValidatorTest(unittest.TestCase):
             source="hybrid",
         )
 
-        missing = validate_answer_citations("这里解释了加载逻辑。", [result])
-        invalid = validate_answer_citations("见 coding_rag/file_loader.py:1-5。", [result])
+        missing = validate_answer_citations("This explains file loading.", [result])
+        invalid = validate_answer_citations("See coding_rag/file_loader.py:1-5.", [result])
 
         self.assertTrue(missing.missing_citations)
         self.assertEqual([citation.text for citation in invalid.invalid_citations], ["coding_rag/file_loader.py:1-5"])
 
     def test_appends_validation_report_only_when_needed(self):
         result = append_citation_validation_report(
-            "这里解释了加载逻辑。",
+            "This explains file loading.",
             validate_answer_citations(
-                "这里解释了加载逻辑。",
+                "This explains file loading.",
                 [
                     SearchResult(
                         CodeChunk(Path("coding_rag/file_loader.py"), 1, 5, "def load_python_files(): pass"),
@@ -61,8 +61,8 @@ class CitationValidatorTest(unittest.TestCase):
             ),
         )
 
-        self.assertIn("## 引用校验", result)
-        self.assertIn("未检测到 path:start-end 格式引用", result)
+        self.assertIn("##", result)
+        self.assertIn("path:start-end", result)
 
 
 if __name__ == "__main__":

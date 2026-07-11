@@ -1,8 +1,8 @@
-from pathlib import Path
+﻿from pathlib import Path
 import unittest
 
-from coding_rag.bm25_retriever import BM25Retriever
-from coding_rag.code_splitter import CodeChunk
+from coding_rag.tools.bm25 import BM25Retriever
+from coding_rag.repository.chunks import CodeChunk
 
 
 class BM25RetrieverRepoIndexTest(unittest.TestCase):
@@ -32,7 +32,7 @@ class BM25RetrieverRepoIndexTest(unittest.TestCase):
             CodeChunk(Path("solutions/python3/2.py"), 1, 4, "class Solution:\n    def addTwoNumbers(self, l1, l2):\n        return None"),
         ]
 
-        results = BM25Retriever(chunks).search("Solution twoSum 函数签名", top_k=1)
+        results = BM25Retriever(chunks).search("Solution twoSum 鍑芥暟绛惧悕", top_k=1)
 
         self.assertEqual(results[0].chunk.file_path, Path("solutions/python3/1.py"))
 

@@ -1,10 +1,10 @@
-from pathlib import Path
+﻿from pathlib import Path
 import unittest
 
-from coding_rag.bm25_retriever import BM25Retriever, SearchResult
-from coding_rag.code_splitter import CodeChunk
-from coding_rag.context_recaller import expand_with_neighbor_chunks
-from coding_rag.result_filter import filter_recalled_results
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult
+from coding_rag.repository.chunks import CodeChunk
+from coding_rag.tools.recall import expand_with_neighbor_chunks
+from coding_rag.tools.filter import filter_recalled_results
 
 
 class ResultFilterTest(unittest.TestCase):

@@ -6,10 +6,10 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from rag.prompt import compact_results_for_context
+from coding_rag.rag.prompt import compact_results_for_context
 
 if TYPE_CHECKING:
-    from coding_rag.bm25_retriever import SearchResult
+    from coding_rag.tools.bm25 import SearchResult
 
 
 CITATION_PATTERN = re.compile(

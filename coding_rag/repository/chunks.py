@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from coding_rag.file_loader import PythonFile
+from coding_rag.repository.files import PythonFile
 
 
 @dataclass(frozen=True)

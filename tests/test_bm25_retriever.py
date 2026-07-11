@@ -1,8 +1,8 @@
-from pathlib import Path
+﻿from pathlib import Path
 import unittest
 
-from coding_rag.bm25_retriever import BM25Retriever
-from coding_rag.code_splitter import CodeChunk
+from coding_rag.tools.bm25 import BM25Retriever
+from coding_rag.repository.chunks import CodeChunk
 
 
 class BM25RetrieverHybridSearchTest(unittest.TestCase):
@@ -24,7 +24,7 @@ class BM25RetrieverHybridSearchTest(unittest.TestCase):
             CodeChunk(Path("b.py"), 1, 10, "def render_prompt(context):\n    return context"),
         ]
 
-        results = BM25Retriever(chunks).search("complete 函数在哪里", top_k=1)
+        results = BM25Retriever(chunks).search("where is complete function", top_k=1)
 
         self.assertEqual(results[0].chunk.file_path, Path("a.py"))
 

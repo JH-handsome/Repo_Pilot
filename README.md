@@ -6,21 +6,24 @@ RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一�
 
 ```text
 .
-├── coding_rag/              # 核心检索流程：加载、切片、分词、Hybrid Search、召回、过滤、LLM 客户端
-├── rag/                     # 面向大模型的提示词模板和答案生成器
+├── coding_rag/
+│   ├── agent/               # Agent 计划、执行器、安全策略、记忆和审查
+│   ├── rag/                 # ASK、LLM 客户端、prompt、回答生成、引用校验和 trace
+│   ├── repository/          # 文件加载、代码切片和仓库结构索引
+│   └── tools/               # Hybrid Search、分词、召回、过滤和只读工具
 ├── scripts/                 # 离线脚本：检索评测、LeetCode 兼容补丁、数据下载
 ├── datasets/
 │   ├── eval/                # 评测集，支持 JSON 数组和 JSONL trace 两种格式
 │   └── leetcode_reference/  # LeetCode 本地类型参考
 ├── artifacts/               # 运行后生成的 trace、评测结果等临时产物
-├── legacy/                  # 早期原型代码，仅保留作参考
 ├── tests/                   # 单元测试
 ├── main.py                  # 命令行入口
+├── frontend.py              # 浏览器前端
 ├── web_ui.py                # Tkinter 桌面界面
 └── leetcode_types.py        # 本地运行 LeetCode 代码时的类型补丁
 ```
 
-阅读代码时，优先从 `main.py` 和 `coding_rag/` 开始。`legacy/` 只是旧版本原型，不参与当前主流程。
+阅读代码时，优先从 `main.py`、`coding_rag/agent/`、`coding_rag/rag/`、`coding_rag/tools/` 和 `coding_rag/repository/` 开始。
 
 ## 安装
 
@@ -29,6 +32,50 @@ pip install -r requirements.txt
 ```
 
 ## 命令行检索
+
+浏览器前端：
+
+```bash
+python frontend.py
+```
+
+打开 `http://127.0.0.1:8765`，输入仓库路径和问题即可运行 RAG；勾选 `调用大模型回答` 后会基于检索结果生成答案。
+
+在界面顶部选择 **ASK** 或 **Agent** 工作流模式：
+
+- **ASK 模式**：调用 `/api/ask`，检索代码上下文并可选由 LLM 生成回答，适合代码库问答。
+- **Agent 模式**：调用 `/api/agent-plan`，生成 ReAct Agent 工作流计划（包含工具接口、候选文件和验证步骤），可选启用 LLM 生成详细计划和审查。
+
+Agent 模式请求示例：
+
+```json
+{
+  "repo_path": ".",
+  "query": "实现 load_data 的缓存功能",
+  "top_k": 5,
+  "recall_window": 2,
+  "use_llm": true,
+  "provider": "deepseek",
+  "review_agent_plan": false
+}
+```
+
+响应包含 `plan`、`plan_text`（LLM 计划）、`prompt`（LLM prompt）、`tools`（工具接口列表）、`stats`（检索统计）和可选的 `review`（计划审查结果）。
+
+最简单的交互式入口：
+
+```bash
+python main.py
+```
+
+按提示输入仓库路径，之后连续输入问题或需求。只指定仓库也可以直接进入交互模式：
+
+```bash
+python main.py .
+python main.py data\repos\django
+```
+
+交互模式会先询问是否调用大模型回答。选择 `y` 后会读取 `.env` 并用 RAG 检索结果生成答案；选择 `n` 则只展示检索到的代码块。
 
 基本用法：
 
@@ -44,12 +91,12 @@ python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
 
 默认检索流程：
 
-1. `file_loader` 递归读取 Python 文件，并跳过 `.git`、虚拟环境、缓存目录。
-2. `code_splitter` 按行号把文件切成 `CodeChunk`。
-3. `BM25Retriever` 建立正文 BM25、路径/符号 BM25 和 token 覆盖度信号，并融合检索种子代码块。
-4. `context_recaller` 召回同文件相邻代码块，补足上下文。
-5. `result_filter` 重新评分并保留最终上下文。
-6. `rag.prompt` 在发送给 LLM 前合并同文件连续/重叠代码块，减少重复上下文。
+1. `coding_rag.repository.files` 递归读取 Python 文件，并跳过 `.git`、虚拟环境、缓存目录。
+2. `coding_rag.repository.chunks` 按行号把文件切成 `CodeChunk`。
+3. `coding_rag.tools.bm25.BM25Retriever` 建立正文 BM25、路径/符号 BM25 和 token 覆盖度信号，并融合检索种子代码块。
+4. `coding_rag.tools.recall` 召回同文件相邻代码块，补足上下文。
+5. `coding_rag.tools.filter` 重新评分并保留最终上下文。
+6. `coding_rag.rag.prompt` 在发送给 LLM 前合并同文件连续/重叠代码块，减少重复上下文。
 7. CLI 打印代码块；如果开启 `--llm`，再把上下文交给大模型回答。
 
 常用参数：
@@ -122,7 +169,26 @@ python main.py . "linked list cycle" --llm --llm-provider custom
 
 ## Agent 工作流
 
-如果希望从“用户任务”出发，让 RepoPilot 自动读取记忆、检索上下文、生成实施计划，并记录本次经验：
+新的 ReAct Agent 计划模式只做计划，不执行工具调用：
+
+```bash
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --show-agent-prompt
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --llm --llm-provider deepseek
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --llm --review-agent-plan
+```
+
+当前计划模式会完成任务分析、RAG 上下文检索、工具接口声明，并把这些内容整理成 LLM 计划 prompt。工具接口已经声明，但还不会实际调用工具或修改代码。
+`--review-agent-plan` 会在生成计划后再次调用 LLM 审查计划是否合理，并输出评分、问题和改进建议。
+
+Agent 计划测试集可从 SWE-bench Verified 导入：
+
+```bash
+python scripts/import_agent_plan_cases.py --limit 50 --output datasets/eval/agent_plan_cases.json
+python -m unittest tests.test_task_planner
+```
+
+如果希望从 `用户任务` 出发，让 RepoPilot 自动读取记忆、检索上下文、生成实施计划，并记录本次经验：
 
 ```bash
 python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent
@@ -140,11 +206,17 @@ python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent --llm
 python main.py . "优化 trace 分析" --agent --show-trace
 python main.py . "优化 trace 分析" --agent --trace-out artifacts/agent_run.json
 python main.py . "优化 trace 分析" --agent --agent-memory artifacts/agent_memory.jsonl
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --llm
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --dry-run
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --safe-mode
+python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --agent-policy .repopilot/policy.json
 ```
+
+Agent executor 安全策略可通过 `.repopilot/policy.json` 或 `--agent-policy PATH` 配置。默认 denylist 始终优先，dry-run/safe-mode 会强制 patch 不落盘、命令不执行。
 
 Agent 默认记忆路径是 `artifacts/agent_memory.jsonl`。每条记忆会记录任务、状态、摘要、相关文件和关键决策；下一次 Agent 运行会按任务相关性读取近期记忆。相同任务和相同文件集合的记忆会自动跳过，避免重复污染记忆库。
 
-Agent 输出默认包含“Agent 运行轨迹”，展示每一步的状态和关键产物；加上 `--show-trace` 后，还会显示更详细的 RAG 检索轨迹。Agent 还会生成任务画像，例如 `feature`、`bugfix`、`optimization`、`evaluation`、`docs`、`test`，并据此给出更贴近任务类型的验证命令。
+Agent 输出默认包含 `Agent 运行轨迹`，展示每一步的状态和关键产物；加上 `--show-trace` 后，还会显示更详细的 RAG 检索轨迹。Agent 还会生成任务画像，例如 `feature`、`bugfix`、`optimization`、`evaluation`、`docs`、`test`，并据此给出更贴近任务类型的验证命令。
 
 当前 Agent 工作流：
 
@@ -194,18 +266,30 @@ Trace 中会包含 `trajectory` 字段，用来观察 `initial_search`、`neighb
 python scripts/retrieval_eval.py . datasets/eval/sample_evalset.json --optimize
 ```
 
+Agent 计划离线评测：
+
+```bash
+python scripts/agent_eval.py --evalset datasets/eval/agent_plan_cases.json --trace-out artifacts/agent_eval_trace.jsonl --summary-out artifacts/agent_eval_summary.json
+```
+
+生成函数地图：
+
+```bash
+python scripts/generate_function_map.py --output FUNCTION_MAP.md
+```
+
 评测集可以写成 JSON 数组：
 
 ```json
 [
-  {"id": "case-1", "query": "BM25 检索器在哪里建立索引？", "relevant": ["coding_rag/bm25_retriever.py"]}
+  {"id": "case-1", "query": "BM25 检索器在哪里建立索引？", "relevant": ["coding_rag/tools/bm25.py"]}
 ]
 ```
 
 也可以写成 JSONL，每行一个问题：
 
 ```json
-{"id": "q001", "question": "代码文件是在哪里被读取的？", "gold_files": ["coding_rag/file_loader.py"]}
+{"id": "q001", "question": "代码文件是在哪里被读取的？", "gold_files": ["coding_rag/repository/files.py"]}
 ```
 
 ## LeetCode 数据
@@ -220,5 +304,5 @@ python scripts/patch_leetcode_imports.py datasets/leetcode-python
 
 ```bash
 python -m unittest
-python -m compileall coding_rag rag scripts main.py web_ui.py tests
+python -m compileall coding_rag main.py frontend.py web_ui.py scripts tests
 ```
