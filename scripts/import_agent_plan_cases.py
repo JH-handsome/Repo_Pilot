@@ -16,6 +16,11 @@ DATASET_ROWS_URL = "https://datasets-server.huggingface.co/rows"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。
+
+    Returns:
+        包含数据集、配置、分割、限制、偏移和输出路径等参数的命名空间对象。
+    """
     parser = argparse.ArgumentParser(description="Import Agent planning cases from SWE-bench Verified")
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
     parser.add_argument("--config", default="default")
@@ -27,6 +32,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """主入口函数。
+
+    从 SWE-bench Verified 数据集获取指定行，转换为评测用例格式，写入 JSON 文件。
+
+    Returns:
+        0 表示正常退出。
+    """
     args = parse_args()
     rows = fetch_rows(
         dataset=args.dataset,
@@ -49,6 +61,18 @@ def fetch_rows(
     offset: int,
     limit: int,
 ) -> list[dict]:
+    """通过 Hugging Face datasets-server HTTP API 获取数据集行。
+
+    Args:
+        dataset: 数据集名称，如 "princeton-nlp/SWE-bench_Verified"。
+        config: 数据集配置名称。
+        split: 数据分割名称。
+        offset: 起始偏移量。
+        limit: 最大返回行数。
+
+    Returns:
+        从 API 响应的 "rows" 字段中提取的行字典列表。
+    """
     query = urlencode(
         {
             "dataset": dataset,
@@ -64,6 +88,16 @@ def fetch_rows(
 
 
 def convert_row(row: dict) -> dict:
+    """将原始数据集行转换为 Agent 计划评测用例格式。
+
+    从原始行中提取补丁文件、测试文件、任务描述等信息，构造标准化的评测用例字典。
+
+    Args:
+        row: 原始行字典，包含 patch、test_patch、problem_statement 等字段。
+
+    Returns:
+        包含 id、repo、task、changed_files、repo_files 等字段的用例字典。
+    """
     changed_files = diff_paths(row.get("patch", ""))
     test_files = diff_paths(row.get("test_patch", ""))
     repo_files = build_repo_files(row, changed_files, test_files)
@@ -86,6 +120,16 @@ def convert_row(row: dict) -> dict:
 
 
 def diff_paths(diff_text: str) -> list[str]:
+    """从 Git diff 文本中提取唯一的 Python 目标文件路径。
+
+    仅保留补丁中以 .py 结尾的目标路径，去重后返回。
+
+    Args:
+        diff_text: Git diff 格式的补丁文本。
+
+    Returns:
+        去重后的 Python 文件路径列表。
+    """
     paths: list[str] = []
     for match in re.finditer(r"^diff --git a/(.*?) b/(.*?)$", diff_text, flags=re.MULTILINE):
         path = match.group(2)
@@ -95,6 +139,19 @@ def diff_paths(diff_text: str) -> list[str]:
 
 
 def build_repo_files(row: dict, changed_files: list[str], test_files: list[str]) -> dict[str, str]:
+    """为离线计划评测生成最多若干个上下文文件。
+
+    从变更文件和测试文件各取至多 3 个不重复路径（总计最多 6 个），若均为空则回退为
+    issue_context.py；为每个路径构造包含实例元信息、问题描述和提示文本的占位文件内容。
+
+    Args:
+        row: 原始行字典。
+        changed_files: 变更文件路径列表。
+        test_files: 测试文件路径列表。
+
+    Returns:
+        路径到文件内容的映射字典。
+    """
     paths = changed_files[:3] + [path for path in test_files[:3] if path not in changed_files[:3]]
     if not paths:
         paths = ["issue_context.py"]
@@ -118,10 +175,26 @@ def build_repo_files(row: dict, changed_files: list[str], test_files: list[str])
 
 
 def normalize_task(text: str) -> str:
+    """规范化任务文本，去除每行尾部空白并压缩首尾空行。
+
+    Args:
+        text: 原始任务文本。
+
+    Returns:
+        规范化后的文本。
+    """
     return "\n".join(line.rstrip() for line in text.strip().splitlines())
 
 
 def parse_json_list(text: str) -> list[str]:
+    """解析 JSON 字符串为列表；解析失败或结果非列表时返回空列表。
+
+    Args:
+        text: JSON 格式的字符串。
+
+    Returns:
+        解析得到的字符串列表；若 text 为空、解析失败或结果不是列表则返回 []。
+    """
     if not text:
         return []
     try:

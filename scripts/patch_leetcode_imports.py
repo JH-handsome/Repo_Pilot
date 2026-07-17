@@ -1,3 +1,5 @@
+"""为下载的 LeetCode Python 代码补充本地运行所需的类型导入。"""
+
 from __future__ import annotations
 
 import argparse
@@ -17,6 +19,7 @@ NEEDS_PRELUDE = re.compile(
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(
         description="给下载的 LeetCode Python 代码补充本地运行所需的类型导入。"
     )
@@ -25,6 +28,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """主入口：扫描仓库中所有 Python 文件，为需要类型导入的文件添加补丁。"""
     args = parse_args()
     repo_path = Path(args.repo_path).resolve()
 
@@ -67,6 +71,7 @@ def main() -> None:
 
 
 def should_skip(path: Path) -> bool:
+    """判断是否应跳过该文件。"""
     ignored_dirs = {".git", ".venv", "venv", "__pycache__"}
     if path.name == "leetcode_types.py":
         return True
@@ -74,6 +79,7 @@ def should_skip(path: Path) -> bool:
 
 
 def find_insert_index(lines: list[str]) -> int:
+    """找到应插入导入语句的行索引。"""
     index = 0
 
     if index < len(lines) and lines[index].startswith("#!"):
@@ -92,6 +98,7 @@ def find_insert_index(lines: list[str]) -> int:
 
 
 def skip_blank_and_comment_lines(lines: list[str], index: int) -> int:
+    """跳过空白行和注释行。"""
     while index < len(lines):
         stripped = lines[index].strip()
         if stripped == "" or stripped.startswith("#"):
@@ -102,6 +109,7 @@ def skip_blank_and_comment_lines(lines: list[str], index: int) -> int:
 
 
 def skip_module_docstring(lines: list[str], index: int) -> int:
+    """跳过模块文档字符串。"""
     if index >= len(lines):
         return index
 

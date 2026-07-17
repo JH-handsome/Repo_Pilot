@@ -135,6 +135,7 @@ def add_or_upgrade_result(
 
 
 def is_seed_source(source: str) -> bool:
+    """判断来源是否为直接检索结果（而非相邻召回）。"""
     return source in {"hybrid", "bm25"}
 
 

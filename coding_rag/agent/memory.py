@@ -27,10 +27,12 @@ class AgentMemoryStore:
     """JSONL 本地记忆库。"""
 
     def __init__(self, path: str | Path, tokenizer: CodeTokenizer | None = None):
+        """初始化文件持久化的Agent记忆存储，绑定路径和可选的分词器。"""
         self.path = Path(path)
         self.tokenizer = tokenizer or CodeTokenizer()
 
     def load_all(self) -> list[AgentMemory]:
+        """从持久化JSONL文件中加载全部Agent记忆记录。"""
         if not self.path.exists():
             return []
 
@@ -46,6 +48,7 @@ class AgentMemoryStore:
         return memories
 
     def append(self, memory: AgentMemory) -> None:
+        """将单条Agent记忆序列化为JSON行并追加写入持久化文件。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(asdict(memory), ensure_ascii=False) + "\n")
@@ -58,10 +61,12 @@ class AgentMemoryStore:
         return True
 
     def has_duplicate(self, memory: AgentMemory) -> bool:
+        """通过比较身份键检测重复记忆。"""
         memory_key = memory_identity(memory)
         return any(memory_identity(existing) == memory_key for existing in self.load_all())
 
     def search(self, task: str, limit: int = 5) -> list[AgentMemory]:
+        """基于查询与记忆文本之间的token重叠度进行搜索排序。"""
         if limit <= 0:
             return []
 
@@ -87,6 +92,7 @@ def build_memory(
     files: list[str],
     decisions: list[str],
 ) -> AgentMemory:
+    """根据任务元数据构造AgentMemory实例，并附加UTC创建时间戳。"""
     created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     return AgentMemory(
         id=f"agent-{created_at}",
@@ -100,12 +106,14 @@ def build_memory(
 
 
 def token_overlap(query_tokens: set[str], memory_tokens: set[str]) -> float:
+    """计算查询token集合与记忆token集合的交集占比。"""
     if not query_tokens or not memory_tokens:
         return 0.0
     return len(query_tokens & memory_tokens) / len(query_tokens)
 
 
 def dedupe(values: list[str]) -> list[str]:
+    """按首次出现顺序进行稳定去重。"""
     result: list[str] = []
     for value in values:
         if value not in result:
@@ -114,8 +122,10 @@ def dedupe(values: list[str]) -> list[str]:
 
 
 def memory_identity(memory: AgentMemory) -> tuple[str, tuple[str, ...]]:
+    """基于规范化任务文本和排序文件列表计算记忆的身份标识。"""
     return (normalize_memory_text(memory.task), tuple(sorted(memory.files)))
 
 
 def normalize_memory_text(text: str) -> str:
+    """通过大小写折叠与空白压缩对文本进行规范化处理。"""
     return " ".join(text.casefold().split())

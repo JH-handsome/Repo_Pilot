@@ -6,39 +6,36 @@
 
 ### `main.py`
 
-CLI 入口，负责解析参数、路由 ASK / Agent / legacy judge 流程，并输出检索结果、计划和 trace。
+CLI 统一入口，所有问题和修改需求都交给 LLM 决定直接回答或调用工具。
 
-- `parse_args()`: 定义 CLI 参数，包括检索参数、工作流模式、Agent 执行、dry-run/safe-mode、LLM 配置和 trace 输出。
-- `main()`: CLI 主入口；加载 `.env`，决定进入交互模式还是单次任务。
-- `run_single_turn(args)`: 按 `--agent` / `--agent-exec` / `--workflow-mode` 路由到代码 Agent、ReAct 计划或 ASK。
-- `is_agent_no_write_mode(args)`: 判断 Agent 是否处于 dry-run/safe-mode，避免创建 `.env` 或写运行记录。
-- `run_interactive_cli(args)`: 交互式问答入口，循环读取用户问题并复用单次任务路由。
+- `parse_args()`: 定义检索、回答风格、LLM、policy、trace 和 `--execute-tools` 参数；不再包含 ASK/Agent 模式参数。
+- `main()`: 加载已有 `.env`，决定进入交互模式还是单次统一运行。
+- `run_single_turn(args, client)`: 构建统一配置并调用 `run_unified_query()`。
+- `run_interactive_cli(args)`: 复用一个 LLM client 连续执行统一工作流。
+- `build_chat_client(args)`: 根据 provider 和环境变量创建 OpenAI 兼容 client。
+- `build_runtime_config(args)`: 将 CLI 参数转换为 `UnifiedRunConfig`。
+- `render_unified_run(run)`: 渲染状态、执行授权、调用统计和最终回答。
 - `prompt_with_default(label, default)`: 读取带默认值的交互输入。
-- `prompt_yes_no(label, default)`: 读取 y/n 交互输入。
-- `run_ask_cli(args, requested_mode)`: 执行 ASK 模式；构建 LLM client、调用 `run_ask_mode`、打印结果/trace/prompt/LLM 回答。
-- `ask_run_to_dict(run)`: 把 ASK 运行结果序列化为 trace JSON。
-- `run_react_agent_cli(args)`: 执行 ReAct Agent 计划模式；声明工具、可选调用 LLM 生成计划、可选审查计划。
-- `agent_plan_run_to_dict(run)`: 把 Agent 计划运行结果序列化为 trace JSON。
-- `run_agent_cli(args)`: 执行代码 Agent 工作流；读取记忆、检索上下文、生成计划/草案、写记忆和运行日志。
-- `run_llm_judge(args, results)`: 兼容旧版 LLM judge 调用链。
-- `print_search_results(results)`: 将检索结果按文件、行号、分数和代码片段打印。
-- `print_llm_setup_hint(provider, file)`: 输出不同 LLM provider 的环境变量配置提示。
+- `configure_utf8_stdio()`: 在 Windows 终端和重定向日志中保持中文输出为 UTF-8。
+- `print_llm_setup_hint(provider, file)`: 输出 LLM 环境变量配置提示。
 
 ### `frontend.py`
 
-轻量浏览器前端，提供 `/api/ask` 和 `/api/agent-plan` HTTP API，并内嵌单页 HTML。
+轻量浏览器前端，只提供统一 `/api/run`，并使用服务端与页面双重执行授权。
 
-- `parse_args()`: 解析前端服务监听地址和端口。
+- `parse_args()`: 解析监听地址、端口和 `--allow-tool-execution`。
+- `RepoPilotServer`: 保存服务级工具执行授权。
 - `RepoPilotHandler.do_GET()`: 返回首页 HTML 或 404。
-- `RepoPilotHandler.do_POST()`: 路由 `/api/ask`、`/api/agent-plan`，统一 JSON 响应和错误处理。
+- `RepoPilotHandler.do_POST()`: 只处理 `/api/run`，按错误类型返回 400/403/502/500。
+- `RepoPilotHandler.server_allows_execution()`: 读取服务级执行授权。
 - `RepoPilotHandler.read_json()`: 读取并解析请求体 JSON。
 - `RepoPilotHandler.send_html()`: 返回 HTML 页面。
 - `RepoPilotHandler.send_json()`: 返回 JSON API 响应。
 - `RepoPilotHandler.log_message()`: 静默 HTTP server 默认日志。
-- `run_frontend_ask(payload)`: 浏览器 ASK API；执行检索，可选调用 LLM，返回计划、统计、prompt 和结果。
-- `run_frontend_agent_plan(payload)`: 浏览器 Agent 计划 API；声明工具，可选只读观察、LLM 计划和 LLM 审查。
+- `run_frontend_query(payload, server_allows_execution)`: 校验双重授权并运行统一 LLM 工具循环。
 - `empty_to_none(value)`: 将表单空值规范化为 `None`。
-- `serialize_results(results)`: 将 `SearchResult` 转成前端可消费 JSON。
+- `configure_utf8_stdio()`: 将前端服务帮助文本输出配置为 UTF-8。
+- `build_index_html(allow_tool_execution)`: 将服务执行能力注入前端页面。
 - `main()`: 启动本地 HTTP server。
 
 ### `web_ui.py`
@@ -66,6 +63,24 @@ Tkinter 桌面 UI，覆盖检索、LLM 回答、评测、bad case 查看和参�
 - `main()`: 启动 Tkinter 应用。
 
 ## Agent 模块
+
+### `coding_rag/agent/runtime.py`
+
+CLI 和浏览器共用的统一 LLM 决策循环。
+
+- `UnifiedRunConfig`: 统一运行配置，包括 Hybrid Search、回答风格、上下文限制、policy 和最大工具步数。
+- `ModelDecision`: 模型结构化决策，字段为 `action/reason/answer/tool/arguments/expected_observation`。
+- `UnifiedRun`: 最终回答、状态、决策、observation、trace 和执行授权。
+- `run_unified_query(query, config, client, execute_tools, safety_policy)`: 在 `answer` 与五个工具之间循环，处理修复、步数限制、动态状态和引用校验。
+- `build_hybrid_search_provider(config)`: 把 ASK 的候选检索、邻居召回和最终过滤包装为 executor 搜索 provider。
+- `serialize_search_results(results, repo_path)`: 将最终检索结果转为带相对路径和行号的工具输出。
+- `build_unified_messages(query, config, execution_enabled)`: 生成 JSON 决策协议、工具 schema 和不可信仓库数据约束。
+- `parse_model_decision(raw_text)`: 校验模型 JSON、action、工具名和参数类型。
+- `build_unified_trace(...)`: 创建 `mode=unified` 的 run/events/artifacts 外壳。
+- `compact_tool_result(tool, result, max_chars)`: 截断发送回 LLM 和写入 trace 的 observation。
+- `collect_observed_ranges(tool, result, observed_ranges)`: 收集搜索和文件读取证据范围供引用校验。
+- `finish_unified_run(...)`: 计算摘要并完成统一运行结果。
+- `unified_run_to_dict(run)`: 生成 CLI/HTTP 共用的响应结构。
 
 ### `coding_rag/agent/planner.py`
 
@@ -131,10 +146,10 @@ ASK/Agent 分类和 ReAct 计划模式核心。
 Agent 工具执行器，封装可执行工具表面。
 
 - `CommandResult`: 命令执行结果数据结构。
-- `AgentExecutor.__init__(repo_path, chunk_size, overlap, command_timeout, dry_run, safe_mode, safety_policy)`: 绑定仓库根目录、只读工具和安全策略。
+- `AgentExecutor.__init__(repo_path, chunk_size, overlap, command_timeout, dry_run, safe_mode, safety_policy, search_provider)`: 绑定仓库根目录、只读工具、安全策略和可选 Hybrid Search provider。
 - `AgentExecutor.call(name, arguments)`: 工具分发入口。
 - `AgentExecutor.read_file(path, start_line, end_line)`: 读取仓库内文件。
-- `AgentExecutor.search_code(query, top_k)`: 复用只读检索工具搜索代码。
+- `AgentExecutor.search_code(query, top_k)`: 优先调用注入的 Hybrid Search provider，否则复用基础只读检索。
 - `AgentExecutor.apply_patch(diff)`: 经过安全检查后校验并应用 unified diff；dry-run/safe-mode 只做 `git apply --check`。
 - `AgentExecutor.run_command(cmd, timeout_seconds)`: 经过 allowlist/denylist 检查后以 `shell=False` 执行命令，并返回截断信息。
 - `AgentExecutor.inspect_diff()`: 查看当前 `git diff --no-ext-diff --`。
@@ -267,6 +282,7 @@ OpenAI-compatible LLM client 和 provider 配置。
 - `CitationValidationResult.has_issues`: 是否存在缺失或无效引用。
 - `extract_citations(text)`: 提取回答中的引用。
 - `validate_answer_citations(answer, results)`: 校验引用是否由检索上下文支持。
+- `validate_answer_citations_against_ranges(answer, available_ranges)`: 校验统一工具循环中已观察文件范围的引用。
 - `citation_is_supported(citation, results)`: 判断单个引用是否覆盖检索结果行号。
 - `paths_match(left, right)`: 判断引用路径和结果路径是否匹配。
 - `normalize_path(path)`: 规范化路径分隔符。

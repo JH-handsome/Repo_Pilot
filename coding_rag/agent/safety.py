@@ -60,6 +60,8 @@ MAX_TIMEOUT_SECONDS = 300
 
 @dataclass(frozen=True)
 class SafetyDecision:
+    """不可变的安全决策记录，包含允许/拒绝/试运行结果及匹配的规则元数据。"""
+
     allowed: bool
     reason: str
     matched_rule: str | None = None
@@ -69,6 +71,8 @@ class SafetyDecision:
 
 @dataclass(frozen=True)
 class AgentSafetyPolicy:
+    """不可变的安全限制与允许/拒绝策略配置。"""
+
     dry_run: bool = False
     safe_mode: bool = False
     command_timeout_seconds: int = 60
@@ -79,6 +83,7 @@ class AgentSafetyPolicy:
 
     @property
     def no_execute(self) -> bool:
+        """dry_run 或 safe_mode 任一为真时返回 True。"""
         return self.dry_run or self.safe_mode
 
 
@@ -86,9 +91,12 @@ class AgentSafetyGuard:
     """Central safety policy for patch and command execution."""
 
     def __init__(self, policy: AgentSafetyPolicy | None = None):
+        """使用提供的策略或默认策略初始化安全守卫。"""
         self.policy = policy or AgentSafetyPolicy()
 
     def check_command(self, cmd: str) -> SafetyDecision:
+        """解析命令并应用拒绝/允许规则返回 SafetyDecision；仅允许时附带解析参数与试运行标志。"""
+        # 检查顺序很重要：先拒绝 shell 组合语法，再看 denylist，最后才看 allowlist。
         args = parse_command(cmd)
         normalized = normalize_args(args)
         if not normalized:
@@ -114,6 +122,8 @@ class AgentSafetyGuard:
         )
 
     def check_patch(self, diff: str) -> SafetyDecision:
+        """检查补丁路径及删除数量是否符合安全策略，返回安全/试运行决策。"""
+        # patch 安全检查只看“能不能被 Agent 尝试”，真正能否应用由 git apply --check 再判断。
         if not diff.strip():
             return SafetyDecision(False, "diff is required")
         if len(diff) > self.policy.max_patch_chars:
@@ -148,11 +158,13 @@ class AgentSafetyGuard:
         )
 
     def resolve_timeout(self, timeout_seconds: int | None = None) -> int:
+        """将请求/默认超时值限制在策略和硬上限范围内。"""
         timeout = timeout_seconds if timeout_seconds is not None else self.policy.command_timeout_seconds
         timeout = max(1, int(timeout))
         return min(timeout, MAX_TIMEOUT_SECONDS)
 
     def truncate_output(self, text: str) -> tuple[str, bool, int]:
+        """截断文本至策略上限并返回文本、截断标志和原始长度。"""
         char_count = len(text)
         limit = self.policy.max_output_chars
         if char_count <= limit:
@@ -162,6 +174,7 @@ class AgentSafetyGuard:
 
 
 def parse_command(cmd: str) -> list[str]:
+    """使用 POSIX shlex 规则将命令字符串拆分为参数列表，shlex 语法错误转换为 AgentToolError。"""
     try:
         return shlex.split(cmd, posix=True)
     except ValueError as exc:
@@ -169,6 +182,7 @@ def parse_command(cmd: str) -> list[str]:
 
 
 def normalize_args(args: Iterable[str]) -> list[str]:
+    """规范化可执行文件别名并返回调整后的参数列表。"""
     normalized: list[str] = []
     for index, arg in enumerate(args):
         value = arg.strip().strip("\"'").casefold()
@@ -184,6 +198,7 @@ def matching_prefix(
     args: list[str],
     prefixes: tuple[tuple[str, ...], ...],
 ) -> tuple[str, ...] | None:
+    """返回第一个与 args 开头匹配的前缀（按给定顺序），无匹配则返回 None。"""
     for prefix in prefixes:
         if len(args) >= len(prefix) and tuple(args[: len(prefix)]) == prefix:
             return prefix
@@ -191,16 +206,19 @@ def matching_prefix(
 
 
 def command_rule_name(prefix: tuple[str, ...]) -> str:
+    """将命令-规则令牌元组合并为其显示名称。"""
     return " ".join(prefix)
 
 
 def inspect_patch_paths(diff: str) -> tuple[list[str], list[str]]:
+    """解析 diff 头信息，返回变更路径列表和删除路径列表。"""
     changed: list[str] = []
     deleted: list[str] = []
     current_file: str | None = None
     current_block: list[str] = []
 
     def finalize_current_file() -> None:
+        """当前差异块含 /dev/null 时，将当前文件路径追加到已删除路径列表中。"""
         if current_file and "/dev/null" in "\n".join(current_block):
             deleted.append(current_file)
 
@@ -224,12 +242,14 @@ def inspect_patch_paths(diff: str) -> tuple[list[str], list[str]]:
 
 
 def strip_git_prefix(path: str) -> str:
+    """去除diff路径的前缀 "a/" 或 "b/"。"""
     if path.startswith(("a/", "b/")):
         return path[2:]
     return path
 
 
 def is_unsafe_patch_path(path: str) -> bool:
+    """检测绝对路径、路径遍历或其它不允许的补丁路径。"""
     normalized = path.replace("\\", "/")
     if normalized.startswith("/") or WINDOWS_ABSOLUTE_PATTERN.match(path):
         return True
@@ -238,12 +258,14 @@ def is_unsafe_patch_path(path: str) -> bool:
 
 
 def is_env_path(path: str) -> bool:
+    """检测路径的 basename 是否为 .env 或以 .env. 开头。"""
     name = PurePosixPath(path.replace("\\", "/")).name
     return name == ".env" or name.startswith(".env.")
 
 
 def load_agent_safety_policy(repo_path: str | Path = ".", policy_path: str | Path | None = None) -> AgentSafetyPolicy:
     """Load an optional project safety policy while keeping denylist defaults."""
+    # 项目配置只允许扩展策略；默认 denylist 会始终合并回来，避免本地配置绕过硬限制。
     path = Path(policy_path) if policy_path else Path(repo_path) / ".repopilot" / "policy.json"
     if not path.exists():
         return AgentSafetyPolicy()
@@ -267,6 +289,7 @@ def load_agent_safety_policy(repo_path: str | Path = ".", policy_path: str | Pat
 
 
 def parse_rule_list(value: object, default: tuple[tuple[str, ...], ...]) -> list[tuple[str, ...]]:
+    """验证并解析策略规则条目为命令令牌元组。"""
     if value is None:
         return list(default)
     if not isinstance(value, list):
@@ -285,6 +308,7 @@ def parse_rule_list(value: object, default: tuple[tuple[str, ...], ...]) -> list
 
 
 def merge_rule_lists(*rule_lists: Iterable[tuple[str, ...]]) -> list[tuple[str, ...]]:
+    """按顺序合并各规则可迭代对象，丢弃空规则和重复项。"""
     merged: list[tuple[str, ...]] = []
     seen: set[tuple[str, ...]] = set()
     for rules in rule_lists:

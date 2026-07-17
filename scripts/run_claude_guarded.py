@@ -26,6 +26,15 @@ DEFAULT_TIMEOUT_SECONDS = 300
 
 @dataclass
 class ClaudeUsage:
+    """汇总 Claude Code 子进程输出事件中观测到的令牌用量。
+
+    Attributes:
+        input_tokens: 输入令牌数。
+        output_tokens: 输出令牌数。
+        cache_read_input_tokens: 缓存读取的输入令牌数。
+        cache_creation_input_tokens: 缓存创建的输入令牌数。
+    """
+
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_input_tokens: int = 0
@@ -33,6 +42,7 @@ class ClaudeUsage:
 
     @property
     def task_tokens(self) -> int:
+        """总任务令牌数 = input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens。"""
         return (
             self.input_tokens
             + self.output_tokens
@@ -42,10 +52,12 @@ class ClaudeUsage:
 
     @property
     def cache_miss_tokens(self) -> int:
+        """缓存未命中令牌数 = input_tokens + cache_creation_input_tokens。"""
         return self.input_tokens + self.cache_creation_input_tokens
 
     @property
     def cache_input_tokens(self) -> int:
+        """缓存输入令牌数 = input_tokens + cache_read_input_tokens + cache_creation_input_tokens。"""
         return (
             self.input_tokens
             + self.cache_read_input_tokens
@@ -54,12 +66,20 @@ class ClaudeUsage:
 
     @property
     def cache_miss_ratio(self) -> float:
+        """缓存未命中比率 = cache_miss_tokens / cache_input_tokens，分母非正时返回 0.0。"""
         if self.cache_input_tokens <= 0:
             return 0.0
         return self.cache_miss_tokens / self.cache_input_tokens
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数，包括守卫限额、权限、超时和日志参数。
+
+    解析 --max-task-tokens、--max-cache-miss-tokens、--max-cache-miss-ratio、
+    --max-budget-usd 等守卫限额，--permission-mode 权限模式，--timeout 超时秒数，
+    以及 --output-log 日志路径。其余未知参数保留并转发给 Claude Code，
+    同时去掉开头的 ``--`` 分隔符。
+    """
     parser = argparse.ArgumentParser(description="Run Claude Code with token guards.")
     parser.add_argument(
         "--max-task-tokens",
@@ -125,6 +145,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """从标准输入读取提示，启动 ``claude`` stream-json 子进程。
+
+    逐行转发子进程 stdout 并聚合 ClaudeUsage；守卫在观察到 token 或缓存阈值超限时终止子进程并记录日志；美元预算仅传给 Claude Code，非守卫观测的预算上限；子进程等待超时时同样终止。
+    守卫终止返回 124，空提示返回 2。
+    """
     args = parse_args()
     prompt = sys.stdin.read().lstrip("\ufeff")
     if not prompt.strip():
@@ -204,6 +229,7 @@ def main() -> int:
 
 
 def parse_json_line(line: str) -> dict[str, Any] | None:
+    """仅当行是 JSON 对象时返回字典，否则返回 None。"""
     try:
         value = json.loads(line)
     except json.JSONDecodeError:
@@ -212,6 +238,7 @@ def parse_json_line(line: str) -> dict[str, Any] | None:
 
 
 def update_usage_from_event(usage: ClaudeUsage, event: dict[str, Any]) -> None:
+    """从事件的直接/message usage 与按模型汇总 usage 中取各字段较大值更新峰值观测。"""
     usage_payload = find_usage_payload(event)
     if usage_payload:
         usage.input_tokens = max(usage.input_tokens, int(usage_payload.get("input_tokens") or 0))
@@ -248,6 +275,7 @@ def update_usage_from_event(usage: ClaudeUsage, event: dict[str, Any]) -> None:
 
 
 def find_usage_payload(event: dict[str, Any]) -> dict[str, Any] | None:
+    """查找事件顶层或 message 内的 usage 字典并返回。"""
     direct = event.get("usage")
     if isinstance(direct, dict):
         return direct
@@ -258,6 +286,7 @@ def find_usage_payload(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def find_model_usage_payloads(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """从 modelUsage 映射中过滤并返回字典值列表。"""
     model_usage = event.get("modelUsage")
     if not isinstance(model_usage, dict):
         return []
@@ -265,6 +294,7 @@ def find_model_usage_payloads(event: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def guard_reason(args: argparse.Namespace, usage: ClaudeUsage) -> str | None:
+    """按总任务token、缓存未命中token、达到最小缓存输入后的未命中比例依次检查并返回首个停止原因。"""
     if usage.task_tokens > args.max_task_tokens:
         return f"task tokens {usage.task_tokens} exceeded limit {args.max_task_tokens}"
     if usage.cache_miss_tokens > args.max_cache_miss_tokens:
@@ -284,6 +314,7 @@ def guard_reason(args: argparse.Namespace, usage: ClaudeUsage) -> str | None:
 
 
 def write_log(log_file, event: str, reason: str, usage: ClaudeUsage) -> None:
+    """把事件、原因和用量快照写为一条JSONL并刷新。"""
     payload = {
         "event": event,
         "reason": reason,

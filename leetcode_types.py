@@ -37,6 +37,7 @@ class ListNode:
         self.next = next
 
     def __repr__(self) -> str:
+        """返回链表节点的格式化字符串表示。"""
         return f"ListNode({self.val})"
 
 
@@ -60,6 +61,7 @@ class TreeNode:
         self.right = right
 
     def __repr__(self) -> str:
+        """返回形如 TreeNode(val) 的字符串表示。"""
         return f"TreeNode({self.val})"
 
 
@@ -124,6 +126,7 @@ class Node:
         self.child = child
 
     def __repr__(self) -> str:
+        """返回节点的字符串表示形式。"""
         return f"Node({self.val})"
 
 
@@ -134,6 +137,7 @@ NaryNode = Node  # N 叉树节点
 
 
 def build_linked_list(values: list[int]) -> Optional[ListNode]:
+    """将整数列表转换为链表。"""
     dummy = ListNode()
     current = dummy
 
@@ -145,6 +149,7 @@ def build_linked_list(values: list[int]) -> Optional[ListNode]:
 
 
 def linked_list_to_list(head: Optional[ListNode]) -> list[int]:
+    """将链表转换为 Python 列表。"""
     values: list[int] = []
     current = head
 
@@ -156,6 +161,7 @@ def linked_list_to_list(head: Optional[ListNode]) -> list[int]:
 
 
 def build_binary_tree(values: list[Any]) -> Optional[TreeNode]:
+    """从层序遍历列表构建二叉树，None 表示空节点。"""
     if not values or values[0] is None:
         return None
 
@@ -180,6 +186,7 @@ def build_binary_tree(values: list[Any]) -> Optional[TreeNode]:
 
 
 def binary_tree_to_list(root: Optional[TreeNode]) -> list[Any]:
+    """按层序遍历将二叉树转换为列表，并移除末尾的空节点占位。"""
     if root is None:
         return []
 

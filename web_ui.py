@@ -40,6 +40,7 @@ class RepoPilotUI:
     """Simple desktop UI for interactive RAG search and evals."""
 
     def __init__(self, root: tk.Tk) -> None:
+        """初始化 RepoPilot 用户界面及所有控件变量。"""
         self.root = root
         self.root.title("RepoPilot Prompt UI")
         self.root.geometry("1100x760")
@@ -62,6 +63,7 @@ class RepoPilotUI:
         self._build_layout()
 
     def _build_layout(self) -> None:
+        """构建主界面布局，包含仓库路径选择、查询输入和参数配置控件。"""
         controls = ttk.Frame(self.root, padding=10)
         controls.pack(fill=tk.X)
 
@@ -127,11 +129,13 @@ class RepoPilotUI:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
     def _pick_repo_path(self) -> None:
+        """弹出目录选择对话框，让用户选取仓库路径。"""
         selected = filedialog.askdirectory(title="选择要搜索的仓库")
         if selected:
             self.repo_path_var.set(selected)
 
     def _run_async(self) -> None:
+        """在新线程中异步执行查询流水线。"""
         if not self.query_var.get().strip():
             messagebox.showwarning("Incomplete input", "Enter a question or prompt first.")
             return
@@ -140,6 +144,7 @@ class RepoPilotUI:
         thread.start()
 
     def _run_pipeline(self) -> None:
+        """执行仓库代码检索、可选的 LLM 回答生成，并更新界面状态和输出。"""
         self._set_status("处理中...")
         self._set_output("")
 
@@ -210,6 +215,7 @@ class RepoPilotUI:
 
 
     def _pick_evalset(self) -> None:
+        """选择评测集文件并更新路径。"""
         selected = filedialog.askopenfilename(
             title="Choose eval set",
             filetypes=[("Eval set", "*.json *.jsonl"), ("JSON", "*.json"), ("JSONL", "*.jsonl")],
@@ -218,9 +224,11 @@ class RepoPilotUI:
             self.evalset_path_var.set(selected)
 
     def _run_eval_async(self) -> None:
+        """在守护线程中启动评测。"""
         threading.Thread(target=self._run_eval, daemon=True).start()
 
     def _run_eval(self) -> None:
+        """执行检索评测，可选生成 LLM 回答，写出追踪与阶段诊断，并更新界面。"""
         self._set_status("评测中...")
         try:
             cases = load_evalset(self.evalset_path_var.get())
@@ -292,6 +300,7 @@ class RepoPilotUI:
             self._set_status("评测失败")
 
     def _export_last_trace(self) -> None:
+        """将最近评测 trace 导出到用户选择的位置。"""
         if not self.last_trace_path or not self.last_trace_path.exists():
             messagebox.showwarning("No trace", "Run eval first to generate a trace.")
             return
@@ -302,6 +311,7 @@ class RepoPilotUI:
         self._set_status("Trace exported")
 
     def _show_bad_cases(self) -> None:
+        """读取最近 trace 并在界面展示未命中的 bad case。"""
         if not self.last_trace_path or not self.last_trace_path.exists():
             messagebox.showwarning("No data", "Run eval first.")
             return
@@ -317,13 +327,17 @@ class RepoPilotUI:
         self._set_status("Bad Case 展示完成")
 
     def _optimize_async(self) -> None:
+        """在守护线程启动调参。"""
         threading.Thread(target=self._run_optimize, daemon=True).start()
 
     def _run_optimize(self) -> None:
+        """运行评测参数优化并更新界面。"""
         self._set_status("调参中...")
         try:
             cases = load_evalset(self.evalset_path_var.get())
-            class Args: pass
+            class Args:
+                """承载传给优化器的临时参数。"""
+                pass
             args = Args()
             args.repo_path = self.repo_path_var.get().strip()
             args.top_k = self.top_k_var.get()
@@ -335,6 +349,7 @@ class RepoPilotUI:
             self._set_status("调参失败")
 
     def _build_llm_args(self):
+        """根据界面选项构造评测生成器所需的临时 LLM 参数对象。"""
         return type("Args", (), {
             "mode": self.mode_var.get(),
             "llm_provider": self.provider_var.get(),
@@ -356,6 +371,7 @@ class RepoPilotUI:
         stage_summary_path: Path | None = None,
         stage_summary: dict | None = None,
     ) -> str:
+        """将评测指标、产物路径、阶段摘要及可选 LLM 输出渲染为文本。"""
         lines = [
             f"评测完成: {len(rows)} cases",
             f"Bad cases: {bad_count}",
@@ -390,6 +406,7 @@ class RepoPilotUI:
 
     @staticmethod
     def _render_results(results: list[SearchResult]) -> str:
+        """把检索结果格式化为包含分数、来源和代码内容的文本块。"""
         blocks: list[str] = []
         for index, result in enumerate(results, start=1):
             chunk = result.chunk
@@ -406,17 +423,21 @@ class RepoPilotUI:
         return "\n".join(blocks)
 
     def _set_output(self, text: str) -> None:
+        """把输出替换操作调度到 Tk 事件循环。"""
         self.output.after(0, self._replace_output, text)
 
     def _replace_output(self, text: str) -> None:
+        """立即替换文本控件内容。"""
         self.output.delete("1.0", tk.END)
         self.output.insert(tk.END, text)
 
     def _set_status(self, text: str) -> None:
+        """更新界面状态文本。"""
         self.status_var.set(text)
 
 
 def main() -> None:
+    """创建 Tk 根窗口、初始化 RepoPilotUI 并进入事件循环。"""
     app = tk.Tk()
     RepoPilotUI(app)
     app.mainloop()

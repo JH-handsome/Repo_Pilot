@@ -36,6 +36,7 @@ class LLMJudge:
     max_context_chars: int = 12000
 
     def judge(self, query: str, results: list[SearchResult]) -> str:
+        """基于检索结果调用 LLM 判断相关性并生成回答。"""
         messages = build_judge_messages(query, results, self.max_context_chars)
         return self.client.complete(messages)
 

@@ -33,7 +33,10 @@ class WorkflowMode(str, Enum):
 
 
 class ChatClient(Protocol):
+    """聊天补全协议客户端。"""
+
     def complete(self, messages: list[dict[str, str]]) -> str:
+        """执行聊天补全请求。"""
         ...
 
 
@@ -59,6 +62,8 @@ class AgentToolSpec:
 
 @dataclass(frozen=True)
 class AgentPlanConfig:
+    """智能体规划配置数据类。"""
+
     repo_path: str | Path = "."
     top_k: int = 5
     candidate_k: int | None = None
@@ -75,6 +80,8 @@ class AgentPlanConfig:
 
 @dataclass(frozen=True)
 class AgentPlanRun:
+    """智能体规划运行结果数据类。"""
+
     task: str
     plan: TaskPlan
     tools: list[AgentToolSpec]
@@ -89,6 +96,8 @@ class AgentPlanRun:
 
 @dataclass(frozen=True)
 class AgentToolCall:
+    """智能体工具调用数据类。"""
+
     thought: str
     tool: str
     arguments: dict
@@ -98,6 +107,8 @@ class AgentToolCall:
 
 @dataclass(frozen=True)
 class AgentExecutionRun:
+    """智能体执行运行结果数据类。"""
+
     task: str
     plan: TaskPlan
     trace: dict
@@ -108,12 +119,14 @@ class AgentExecutionRun:
 
 
 class ReActAgentInterface:
-    """Agent 模式接口；当前只生成计划，不执行工具调用。"""
+    """Agent 模式接口，支持计划生成与带安全约束的工具执行循环。"""
 
     def __init__(self, tools: list[AgentToolSpec] | None = None):
+        """初始化接口，注入可用工具列表。"""
         self.tools = tools or default_agent_tools()
 
     def plan(self, task: str) -> TaskPlan:
+        """委托任务分类生成执行计划。"""
         return classify_task(task, requested_mode=WorkflowMode.AGENT)
 
     def run(
@@ -126,6 +139,7 @@ class ReActAgentInterface:
         safe_mode: bool = False,
         max_steps: int = 3,
     ) -> AgentExecutionRun:
+        """执行计划的工具调用循环。"""
         return run_agent_execution_loop(
             task,
             config=config or AgentPlanConfig(),
@@ -142,6 +156,7 @@ class ReActAgentInterface:
         config: AgentPlanConfig,
         client: ChatClient | None = None,
     ) -> AgentPlanRun:
+        """构建向后兼容的规划运行结果。"""
         return run_agent_plan_mode(task, config=config, client=client, tools=self.tools)
 
 
@@ -151,6 +166,7 @@ def classify_task(
     generation_mode: GenerationMode = GenerationMode.JUDGE,
 ) -> TaskPlan:
     """根据用户输入和显式模式生成执行计划。"""
+    # 先决定任务走 ASK 还是 Agent；后面的 run_ask_mode / run_agent_plan_mode 都依赖这个结果。
     mode = WorkflowMode(requested_mode)
     if mode == WorkflowMode.AUTO:
         mode = infer_mode(user_input)
@@ -184,6 +200,7 @@ def classify_task(
 
 
 def infer_mode(user_input: str) -> WorkflowMode:
+    """根据任务/请求推断工作流模式。"""
     q = user_input.casefold()
     agent_keywords = [
         "修改",
@@ -210,6 +227,7 @@ def run_ask_mode(
     requested_mode: WorkflowMode | str = WorkflowMode.ASK,
 ) -> AskModeRun:
     """执行 ASK 模式：RAG 检索、prompt 组装和可选 LLM 问答。"""
+    # 这里是 ASK 的业务入口：检索和 prompt 都完成后，只有传入 client 才会真正调用大模型。
     plan = classify_task(query, requested_mode=requested_mode, generation_mode=config.generation_mode)
     if plan.mode != WorkflowMode.ASK:
         raise ValueError("run_ask_mode 只能执行 ASK 模式计划")
@@ -245,6 +263,7 @@ def run_agent_plan_mode(
 
     Agent 计划阶段默认不检索仓库；只有开启 execute_readonly_tools 时才运行只读工具观察。
     """
+    # 计划模式只生成“应该怎么做”，默认不修改文件；只读观察由 execute_readonly_tools 控制。
     plan = classify_task(task, requested_mode=WorkflowMode.AGENT)
     tool_specs = tools or default_agent_tools()
     seed_results: list[SearchResult] = []
@@ -283,6 +302,7 @@ def run_agent_plan_mode(
 
 
 def build_agent_plan_trace(task: str, config: AgentPlanConfig) -> dict:
+    """构建规划追踪事件。"""
     summary = {
         "workflow_mode": WorkflowMode.AGENT.value,
         "seed_count": 0,
@@ -331,6 +351,7 @@ def build_agent_plan_trace(task: str, config: AgentPlanConfig) -> dict:
 
 
 def collect_readonly_observations(task: str, config: AgentPlanConfig) -> list[dict]:
+    """执行配置的只读工具并收集观察结果。"""
     tools = ReadOnlyAgentTools(
         config.repo_path,
         chunk_size=config.chunk_size,
@@ -368,6 +389,7 @@ def run_agent_execution_loop(
     """Run a minimal ReAct tool loop with safe executor-backed tools."""
     if client is None:
         raise ValueError("Agent execution loop requires an LLM client")
+    # 执行模式按 ReAct 循环推进：LLM 产出一个 JSON tool call，executor 执行，结果再作为 observation 反馈。
     plan = classify_task(task, requested_mode=WorkflowMode.AGENT)
     tool_specs = tools or default_agent_tools()
     policy = safety_policy or load_agent_safety_policy(config.repo_path, config.agent_policy_path)
@@ -390,6 +412,7 @@ def run_agent_execution_loop(
         raw = client.complete(messages).strip()
         call = parse_agent_tool_call(raw)
         tool_calls.append(call)
+        # finish 是模型主动结束循环的信号；它不会再调用 executor。
         if call.tool == "finish":
             final_text = call.expected_observation or call.thought
             trace["events"].append(
@@ -403,6 +426,7 @@ def run_agent_execution_loop(
             )
             break
         if call.tool not in allowed_tools:
+            # 未声明工具一律失败并写 trace，避免模型幻觉工具名时静默跳过。
             error = {"type": "UnknownTool", "message": f"unknown tool: {call.tool}", "recoverable": True}
             observation = {"tool": call.tool, "input": call.arguments, "error": error["message"]}
             observations.append(observation)
@@ -418,6 +442,7 @@ def run_agent_execution_loop(
             )
             break
         try:
+            # executor 内部会统一做路径、安全策略、dry-run/safe-mode 和输出截断处理。
             result = executor.call(call.tool, call.arguments)
             observation = {"tool": call.tool, "input": call.arguments, "output": result}
             event = build_tool_event(tool=call.tool, input=call.arguments, result=tool_result_payload(call.tool, result))
@@ -436,6 +461,7 @@ def run_agent_execution_loop(
         observations.append(observation)
         trace["events"].append(event)
         trace["artifacts"]["tools"].append(observation)
+        # observation 追加回对话，让下一轮 LLM 能基于真实工具结果继续决策。
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": "Observation:\n" + json.dumps(observation, ensure_ascii=False)})
 
@@ -460,6 +486,7 @@ def build_agent_execution_trace(
     dry_run: bool,
     safe_mode: bool,
 ) -> dict:
+    """构建 Agent 执行追踪记录。"""
     params = {
         "repo_path": str(config.repo_path),
         "top_k": config.top_k,
@@ -491,6 +518,7 @@ def build_agent_execution_trace(
 
 
 def build_agent_execution_messages(task: str, plan: TaskPlan, tools: list[AgentToolSpec]) -> list[dict[str, str]]:
+    """构建 Agent 执行循环的消息列表。"""
     system_prompt = """你是 RepoPilot 的 ReAct 执行 Agent。
 你每次只能输出一个 JSON 对象，不要输出 markdown。
 JSON 字段固定为 thought, tool, arguments, expected_observation。
@@ -513,6 +541,7 @@ tool 只能是 read_file, search_code, apply_patch, run_command, inspect_diff, f
 
 
 def parse_agent_tool_call(raw_text: str) -> AgentToolCall:
+    """将模型原始文本解析为工具调用记录。"""
     payload = parse_json_object(raw_text)
     arguments = payload.get("arguments") or {}
     if not isinstance(arguments, dict):
@@ -527,6 +556,7 @@ def parse_agent_tool_call(raw_text: str) -> AgentToolCall:
 
 
 def parse_json_object(text: str) -> dict:
+    """从文本中提取 JSON 对象字典。"""
     try:
         payload = json.loads(text)
         return payload if isinstance(payload, dict) else {}
@@ -550,6 +580,7 @@ def parse_json_object(text: str) -> dict:
 
 
 def tool_result_payload(tool: str, result) -> dict:
+    """将工具执行结果规范化为可序列化的 payload。"""
     if isinstance(result, dict):
         payload = dict(result)
     else:
@@ -564,6 +595,7 @@ def tool_result_payload(tool: str, result) -> dict:
 
 
 def default_agent_tools() -> list[AgentToolSpec]:
+    """返回默认的Agent工具规格列表。"""
     return [
         AgentToolSpec(
             name="search_code",
@@ -620,6 +652,7 @@ def build_agent_plan_messages(
     tools: list[AgentToolSpec],
     observations: list[dict] | None = None,
 ) -> list[dict[str, str]]:
+    """构建Agent规划消息列表。"""
     system_prompt = """你是 RepoPilot 的 ReAct 规划 Agent。
 你的职责是先给出可审查的工作流计划，不执行工具、不编造结果、不直接修改文件。
 
@@ -679,6 +712,7 @@ def build_agent_plan_messages(
 
 
 def format_tool_specs(tools: list[AgentToolSpec]) -> str:
+    """格式化工具规格为字符串。"""
     lines: list[str] = []
     for tool in tools:
         schema = ", ".join(f"{key}: {value}" for key, value in tool.input_schema.items())
@@ -687,6 +721,7 @@ def format_tool_specs(tools: list[AgentToolSpec]) -> str:
 
 
 def render_agent_plan_run(run: AgentPlanRun) -> str:
+    """渲染Agent计划运行结果。"""
     lines = [
         "## Agent 计划模式",
         f"- task: {run.task}",
@@ -709,6 +744,7 @@ def render_agent_plan_run(run: AgentPlanRun) -> str:
 
 
 def render_agent_plan_prompt(messages: list[dict[str, str]]) -> str:
+    """渲染已存储的Agent规划提示消息。"""
     blocks = ["## Agent Plan Prompt"]
     for message in messages:
         blocks.append(f"### {message['role']}\n{message['content']}")
@@ -716,6 +752,7 @@ def render_agent_plan_prompt(messages: list[dict[str, str]]) -> str:
 
 
 def render_task_plan(plan: TaskPlan) -> str:
+    """渲染任务计划。"""
     lines = [
         "## 任务分类",
         f"- mode: {plan.mode.value}",
@@ -729,6 +766,7 @@ def render_task_plan(plan: TaskPlan) -> str:
 
 
 def render_ask_prompt(messages: list[dict[str, str]]) -> str:
+    """渲染ASK消息。"""
     blocks = ["## ASK Prompt"]
     for message in messages:
         blocks.append(f"### {message['role']}\n{message['content']}")

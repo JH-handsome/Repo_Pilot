@@ -263,6 +263,7 @@ class ContextBlock:
 
 @dataclass
 class _PendingContextBlock:
+    """构建中的上下文块，用于合并同一文件中相邻或重叠的检索结果片段。"""
     file_path: object
     start_line: int
     end_line: int
@@ -375,6 +376,7 @@ def compact_results_for_context(results: list) -> list[ContextBlock]:
 
 
 def merge_result_into_block(block: _PendingContextBlock, result, rank: int) -> None:
+    """将单个检索结果合并到已有的上下文块中，去重重叠行并更新分数、来源等信息。"""
     chunk = result.chunk
     new_lines = chunk.text.splitlines()
     overlap_line_count = max(0, block.end_line - chunk.start_line + 1)

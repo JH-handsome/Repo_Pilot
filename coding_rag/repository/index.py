@@ -17,6 +17,7 @@ TREE_INTENT_TOKENS = {"filetree", "tree", "path", "module"}
 
 @dataclass(frozen=True)
 class SymbolRecord:
+    """不可变符号记录，描述一个AST符号的基本信息。"""
     name: str
     kind: str
     start_line: int
@@ -27,6 +28,7 @@ class SymbolRecord:
 
 @dataclass(frozen=True)
 class FileIndex:
+    """不可变文件索引记录，存储模块路径、目录层级、符号、导入和调用信息。"""
     path: Path
     module: str
     directories: tuple[str, ...]
@@ -35,6 +37,7 @@ class FileIndex:
     calls: tuple[str, ...] = field(default_factory=tuple)
 
     def symbols_in_range(self, start_line: int, end_line: int) -> tuple[SymbolRecord, ...]:
+        """选择与指定行范围重叠的符号。"""
         return tuple(
             symbol
             for symbol in self.symbols
@@ -44,12 +47,16 @@ class FileIndex:
 
 @dataclass(frozen=True)
 class RepoIndex:
+    """仓库级文件索引。"""
+
     files: dict[str, FileIndex]
 
     def for_chunk(self, chunk: CodeChunk) -> FileIndex | None:
+        """获取代码块对应的文件索引。"""
         return self.files.get(normalize_path(chunk.file_path))
 
     def metadata_for_chunk(self, chunk: CodeChunk) -> str:
+        """为代码块组合文件、符号、导入及调用元数据。"""
         file_index = self.for_chunk(chunk)
         if file_index is None:
             return ""
@@ -78,6 +85,7 @@ class RepoIndex:
         )
 
     def structural_score(self, query_tokens: set[str], chunk: CodeChunk) -> float:
+        """根据代码块的结构化元数据与查询词元的匹配程度进行评分。"""
         file_index = self.for_chunk(chunk)
         if file_index is None:
             return 0.0
@@ -103,6 +111,7 @@ class RepoIndex:
 
 
 def build_repo_index(chunks: list[CodeChunk]) -> RepoIndex:
+    """将代码块按文件分组并构建仓库索引。"""
     files: dict[str, list[CodeChunk]] = {}
     for chunk in chunks:
         files.setdefault(normalize_path(chunk.file_path), []).append(chunk)
@@ -116,6 +125,7 @@ def build_repo_index(chunks: list[CodeChunk]) -> RepoIndex:
 
 
 def build_file_index(chunks: list[CodeChunk]) -> FileIndex:
+    """从 chunks 重建源码并提取文件结构索引。"""
     first_chunk = chunks[0]
     source = rebuild_source(chunks)
     path = first_chunk.file_path
@@ -138,6 +148,7 @@ def build_file_index(chunks: list[CodeChunk]) -> FileIndex:
 
 
 def rebuild_source(chunks: list[CodeChunk]) -> str:
+    """从有序代码块重建文件源文本。"""
     lines_by_number: dict[int, str] = {}
     for chunk in chunks:
         for offset, line in enumerate(chunk.text.splitlines(), start=chunk.start_line):
@@ -150,13 +161,17 @@ def rebuild_source(chunks: list[CodeChunk]) -> str:
 
 
 def extract_symbols(tree: ast.AST) -> list[SymbolRecord]:
+    """从 AST 树中提取所有符号记录（类、函数、异步函数）。"""
     symbols: list[SymbolRecord] = []
 
     class Visitor(ast.NodeVisitor):
+        """遍历 AST 并收集符号记录的访问器。"""
         def __init__(self) -> None:
+            """初始化父级名称栈为空列表。"""
             self.parents: list[str] = []
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            """处理类定义节点，记录类符号信息。"""
             parent = self.parents[-1] if self.parents else None
             symbols.append(
                 SymbolRecord(
@@ -173,12 +188,15 @@ def extract_symbols(tree: ast.AST) -> list[SymbolRecord]:
             self.parents.pop()
 
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            """处理普通函数定义节点。"""
             self._visit_function(node, "function")
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            """访问异步函数定义节点，委托给通用函数处理方法。"""
             self._visit_function(node, "async_function")
 
         def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, kind: str) -> None:
+            """访问函数定义节点，记录符号信息。"""
             parent = self.parents[-1] if self.parents else None
             symbols.append(
                 SymbolRecord(
@@ -199,6 +217,7 @@ def extract_symbols(tree: ast.AST) -> list[SymbolRecord]:
 
 
 def extract_imports(tree: ast.AST) -> list[str]:
+    """遍历AST提取所有import语句中的模块名称，返回字符串列表。"""
     imports: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -216,6 +235,7 @@ def extract_imports(tree: ast.AST) -> list[str]:
 
 
 def extract_calls(tree: ast.AST) -> list[str]:
+    """提取AST中所有函数调用的点分名称及简短名称列表。"""
     calls: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -227,6 +247,7 @@ def extract_calls(tree: ast.AST) -> list[str]:
 
 
 def dotted_name(node: ast.AST) -> str | None:
+    """从 AST 节点中提取点分名称字符串，若为 Name 或 Attribute 链则返回，否则返回 None。"""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -238,6 +259,7 @@ def dotted_name(node: ast.AST) -> str | None:
 
 
 def function_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+    """从AST函数节点提取形如 ``name(arg1, arg2)`` 的签名字符串。"""
     args = [arg.arg for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs]
     if node.args.vararg:
         args.append(node.args.vararg.arg)
@@ -247,6 +269,7 @@ def function_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
 
 
 def class_signature(node: ast.ClassDef) -> str:
+    """返回类的签名，包含类名和基类名称。"""
     bases = [dotted_name(base) or getattr(base, "id", "") for base in node.bases]
     bases = [base for base in bases if base]
     if not bases:
@@ -255,16 +278,19 @@ def class_signature(node: ast.ClassDef) -> str:
 
 
 def symbol_metadata(symbol: SymbolRecord) -> str:
+    """将符号记录格式化为元数据字符串。"""
     parent = f"{symbol.parent}.{symbol.name}" if symbol.parent else symbol.name
     return f"{symbol.kind} {symbol.name} {parent} signature {symbol.signature}"
 
 
 def import_terms(name: str) -> list[str]:
+    """将点分隔的名称拆分为完整名称及其各组成部分的列表。"""
     parts = [part for part in name.split(".") if part]
     return [name, *parts]
 
 
 def module_name(path: Path) -> str:
+    """将路径转换为 Python 模块名（去除 .py 后缀并将路径分隔符替换为点号）。"""
     normalized = normalize_path(path)
     if normalized.endswith(".py"):
         normalized = normalized[:-3]
@@ -272,14 +298,17 @@ def module_name(path: Path) -> str:
 
 
 def ranges_overlap(start_a: int, end_a: int, start_b: int, end_b: int) -> bool:
+    """判断两个整数区间是否有交集。"""
     return start_a <= end_b and start_b <= end_a
 
 
 def normalize_path(path: object) -> str:
+    """将路径统一转为小写正斜杠分隔的字符串形式。"""
     return str(path).replace("\\", "/").casefold()
 
 
 def unique_preserve_order(items: list[str]) -> list[str]:
+    """去重并保持原始顺序，忽略空白项及空字符串。"""
     seen: set[str] = set()
     unique: list[str] = []
     for item in items:
@@ -292,6 +321,7 @@ def unique_preserve_order(items: list[str]) -> list[str]:
 
 
 def terms_match(query_tokens: set[str], values: tuple[str, ...] | list[str]) -> bool:
+    """检查查询词元与值列表中任一标识符词元是否存在交集。"""
     value_tokens: set[str] = set()
     for value in values:
         value_tokens.update(identifier_terms(value))
@@ -299,6 +329,7 @@ def terms_match(query_tokens: set[str], values: tuple[str, ...] | list[str]) -> 
 
 
 def identifier_terms(value: str) -> set[str]:
+    """将标识符字符串归一化并拆分为词条集合。"""
     normalized = value.replace("\\", "/").replace(".", "_").replace("(", "_").replace(")", "_")
     normalized = normalized.replace(",", "_").strip("_").casefold()
     if not normalized:

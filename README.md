@@ -1,6 +1,6 @@
 # RepoPilot：轻量级代码 RAG 检索工具
 
-RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一个 Python 仓库，把代码切成带行号的片段，用 Hybrid Search 找出和问题最相关的代码块，并可选调用大模型生成回答。
+RepoPilot 是一个用于学习和实验的代码检索项目。它会读取 Python 仓库，由 LLM 自动决定直接回答或调用 Hybrid Search、文件读取、补丁和验证命令等工具。
 
 ## 项目结构
 
@@ -31,7 +31,7 @@ RepoPilot 是一个用于学习和实验的代码检索项目。它会读取一�
 pip install -r requirements.txt
 ```
 
-## 命令行检索
+## 统一入口
 
 浏览器前端：
 
@@ -39,14 +39,15 @@ pip install -r requirements.txt
 python frontend.py
 ```
 
-打开 `http://127.0.0.1:8765`，输入仓库路径和问题即可运行 RAG；勾选 `调用大模型回答` 后会基于检索结果生成答案。
+打开 `http://127.0.0.1:8765` 后直接输入问题或修改需求。LLM 会自动决定直接回答，还是调用 `search_code`、`read_file`、`apply_patch`、`run_command`、`inspect_diff`。
 
-在界面顶部选择 **ASK** 或 **Agent** 工作流模式：
+浏览器默认只读。需要真实应用补丁或执行命令时，启动服务和单次请求必须同时授权：
 
-- **ASK 模式**：调用 `/api/ask`，检索代码上下文并可选由 LLM 生成回答，适合代码库问答。
-- **Agent 模式**：调用 `/api/agent-plan`，生成 ReAct Agent 工作流计划（包含工具接口、候选文件和验证步骤），可选启用 LLM 生成详细计划和审查。
+```bash
+python frontend.py --allow-tool-execution
+```
 
-Agent 模式请求示例：
+统一 API 为 `POST /api/run`：
 
 ```json
 {
@@ -54,13 +55,13 @@ Agent 模式请求示例：
   "query": "实现 load_data 的缓存功能",
   "top_k": 5,
   "recall_window": 2,
-  "use_llm": true,
   "provider": "deepseek",
-  "review_agent_plan": false
+  "mode": "judge",
+  "execute_tools": false
 }
 ```
 
-响应包含 `plan`、`plan_text`（LLM 计划）、`prompt`（LLM prompt）、`tools`（工具接口列表）、`stats`（检索统计）和可选的 `review`（计划审查结果）。
+响应包含 `status`、`answer`、`execution`、`summary` 和统一 `trace`。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
 
 最简单的交互式入口：
 
@@ -75,7 +76,7 @@ python main.py .
 python main.py data\repos\django
 ```
 
-交互模式会先询问是否调用大模型回答。选择 `y` 后会读取 `.env` 并用 RAG 检索结果生成答案；选择 `n` 则只展示检索到的代码块。
+交互模式始终调用 LLM。系统只读取已有 `.env` 或环境变量，不会自动创建配置文件。
 
 基本用法：
 
@@ -87,6 +88,7 @@ python main.py /path/to/repo "你的问题" --top-k 5
 
 ```bash
 python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
+python main.py . "修复统一入口的 trace 状态" --execute-tools
 ```
 
 默认检索流程：
@@ -97,7 +99,7 @@ python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
 4. `coding_rag.tools.recall` 召回同文件相邻代码块，补足上下文。
 5. `coding_rag.tools.filter` 重新评分并保留最终上下文。
 6. `coding_rag.rag.prompt` 在发送给 LLM 前合并同文件连续/重叠代码块，减少重复上下文。
-7. CLI 打印代码块；如果开启 `--llm`，再把上下文交给大模型回答。
+7. LLM 根据已有观察决定继续调用工具或生成最终回答。
 
 常用参数：
 
@@ -119,7 +121,7 @@ python main.py . "代码在哪里切成 chunk？" --trace-out artifacts/query_tr
 
 ## 大模型回答
 
-开启 `--llm` 后，系统会把检索结果整理成 prompt，并调用 OpenAI 兼容的 `/chat/completions` 接口。第一次运行时会自动创建 `.env` 模板。
+统一入口必须配置 LLM，并调用 OpenAI 兼容的 `/chat/completions` 接口。请手动准备 `.env` 或环境变量；程序不会自动创建或改写 `.env`。
 
 DeepSeek 示例配置：
 
@@ -153,9 +155,9 @@ LLM_API_KEY_ENV=DEEPSEEK_API_KEY
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your_key"
-python main.py . "BM25 检索模块整体做了什么？" --top-k 5 --llm --llm-provider deepseek
-python main.py . "解释代码切片逻辑" --llm --mode code-understand
-python main.py . "生成一个使用 BM25Retriever 的示例" --llm --mode api
+python main.py . "BM25 检索模块整体做了什么？" --top-k 5 --llm-provider deepseek
+python main.py . "解释代码切片逻辑" --mode code-understand
+python main.py . "生成一个使用 BM25Retriever 的示例" --mode api
 ```
 
 自定义 OpenAI 兼容接口：
@@ -164,69 +166,30 @@ python main.py . "生成一个使用 BM25Retriever 的示例" --llm --mode api
 $env:LLM_API_KEY="your_key"
 $env:LLM_BASE_URL="http://localhost:11434/v1"
 $env:LLM_MODEL="your-model"
-python main.py . "linked list cycle" --llm --llm-provider custom
+python main.py . "linked list cycle" --llm-provider custom
 ```
 
 ## Agent 工作流
 
-新的 ReAct Agent 计划模式只做计划，不执行工具调用：
+用户不再选择 ASK 或 Agent。统一 ReAct 循环中，LLM 每轮返回 `answer` 或 `tool` 决策：
 
 ```bash
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --show-agent-prompt
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --llm --llm-provider deepseek
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --workflow-mode agent --llm --review-agent-plan
+python main.py . "解释统一 trace 的事件顺序" --show-trace
+python main.py . "修复统一 trace 的状态计算" --trace-out artifacts/unified_run.json
+python main.py . "修复统一 trace 的状态计算" --execute-tools
+python main.py . "修复统一 trace 的状态计算" --execute-tools --agent-policy .repopilot/policy.json
 ```
 
-当前计划模式会完成任务分析、RAG 上下文检索、工具接口声明，并把这些内容整理成 LLM 计划 prompt。工具接口已经声明，但还不会实际调用工具或修改代码。
-`--review-agent-plan` 会在生成计划后再次调用 LLM 审查计划是否合理，并输出评分、问题和改进建议。
+默认情况下，`apply_patch` 只运行 `git apply --check`，`run_command` 不启动子进程。`--execute-tools` 只解除本次默认 dry-run；项目 policy 中的 `dry_run` 或 `safe_mode` 仍可强制只读，denylist 始终优先。
 
-Agent 计划测试集可从 SWE-bench Verified 导入：
+统一 trace 依次记录 `model_decision`、工具事件和 `final_answer`，包含耗时、检索阶段、输出截断、安全决策、补丁文件和命令结果。状态可能是 `success`、`dry_run`、`partial` 或 `failed`。
+
+旧 Agent 计划与审查函数继续供离线评测使用，不再作为 CLI 或浏览器工作流。计划测试集仍可通过以下命令维护：
 
 ```bash
 python scripts/import_agent_plan_cases.py --limit 50 --output datasets/eval/agent_plan_cases.json
 python -m unittest tests.test_task_planner
 ```
-
-如果希望从 `用户任务` 出发，让 RepoPilot 自动读取记忆、检索上下文、生成实施计划，并记录本次经验：
-
-```bash
-python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent
-```
-
-启用 LLM 后，Agent 会基于检索上下文和历史记忆生成更具体的实现草案：
-
-```bash
-python main.py . "给 RepoPilot 增加一个新的检索优化点" --agent --llm --llm-provider deepseek
-```
-
-常用参数：
-
-```bash
-python main.py . "优化 trace 分析" --agent --show-trace
-python main.py . "优化 trace 分析" --agent --trace-out artifacts/agent_run.json
-python main.py . "优化 trace 分析" --agent --agent-memory artifacts/agent_memory.jsonl
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --llm
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --dry-run
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --safe-mode
-python main.py . "修复 ASK 模式没有调用大模型回答的问题" --agent-exec --agent-policy .repopilot/policy.json
-```
-
-Agent executor 安全策略可通过 `.repopilot/policy.json` 或 `--agent-policy PATH` 配置。默认 denylist 始终优先，dry-run/safe-mode 会强制 patch 不落盘、命令不执行。
-
-Agent 默认记忆路径是 `artifacts/agent_memory.jsonl`。每条记忆会记录任务、状态、摘要、相关文件和关键决策；下一次 Agent 运行会按任务相关性读取近期记忆。相同任务和相同文件集合的记忆会自动跳过，避免重复污染记忆库。
-
-Agent 输出默认包含 `Agent 运行轨迹`，展示每一步的状态和关键产物；加上 `--show-trace` 后，还会显示更详细的 RAG 检索轨迹。Agent 还会生成任务画像，例如 `feature`、`bugfix`、`optimization`、`evaluation`、`docs`、`test`，并据此给出更贴近任务类型的验证命令。
-
-当前 Agent 工作流：
-
-1. 接收任务：抽取目标、约束和交付物。
-2. 读取记忆：检索历史任务中的相关文件、决策和踩坑。
-3. 检索上下文：用 Hybrid Search 找代码块，并召回相邻上下文。
-4. 规划修改：生成候选文件、执行步骤和风险点。
-5. 生成草案：未启用 LLM 时输出离线计划；启用 LLM 时生成实施草案。
-6. 验证建议：给出应运行的测试、编译和评测。
-7. 写入记忆：把本次任务摘要和决策保存为长期记忆。
 
 ## 桌面界面
 

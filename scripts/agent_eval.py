@@ -16,7 +16,10 @@ from coding_rag.agent.planner import AgentPlanConfig, run_agent_plan_mode
 
 
 class OfflinePlanClient:
+    """离线计划客户端，返回固定的 ReAct 计划文本以支持离线评测。"""
+
     def complete(self, messages):
+        """返回预定义的 ReAct 计划字符串，模拟 LLM 生成计划的过程。"""
         return """## 任务分析
 - 目标: inspect the repository task
 
@@ -40,6 +43,7 @@ class OfflinePlanClient:
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数：评测数据集路径、trace 输出路径、汇总输出路径及用例数量限制。"""
     parser = argparse.ArgumentParser(description="Evaluate Agent planning cases")
     parser.add_argument("--evalset", default="datasets/eval/agent_plan_cases.json")
     parser.add_argument("--trace-out", default="artifacts/agent_eval_trace.jsonl")
@@ -49,6 +53,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def evaluate_cases(evalset: str | Path, limit: int | None = None) -> tuple[list[dict], dict]:
+    """在临时仓库中运行计划模式评测每个案例，汇总工具覆盖率、章节覆盖率、trace 完整性和安全接口指标。
+
+    Returns:
+        (逐条记录列表, 汇总指标字典)
+    """
     cases = json.loads(Path(evalset).read_text(encoding="utf-8"))
     if limit is not None:
         cases = cases[:limit]
@@ -89,23 +98,27 @@ def evaluate_cases(evalset: str | Path, limit: int | None = None) -> tuple[list[
 
 
 def coverage(expected: set[str], actual: set[str]) -> float:
+    """计算预期项在实际项中的覆盖率；预期为空时返回 1.0。"""
     if not expected:
         return 1.0
     return len(expected & actual) / len(expected)
 
 
 def average(values) -> float:
+    """计算数值序列的算术平均值；序列为空时返回 0.0。"""
     values = list(values)
     return sum(values) / len(values) if values else 0.0
 
 
 def write_jsonl(path: str | Path, rows: list[dict]) -> None:
+    """将字典列表写入 JSONL 文件，自动创建父目录。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
 
 
 def main() -> int:
+    """主入口：解析参数、执行离线计划评测、写入 trace 和汇总文件并打印结果。"""
     args = parse_args()
     rows, summary = evaluate_cases(args.evalset, limit=args.limit)
     write_jsonl(args.trace_out, rows)

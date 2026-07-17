@@ -29,12 +29,16 @@ AGENT_WORKFLOW: list[tuple[str, str]] = [
 
 
 class ChatClient(Protocol):
+    """聊天补全协议接口。"""
+
     def complete(self, messages: list[dict[str, str]]) -> str:
+        """执行聊天补全并返回响应文本。"""
         ...
 
 
 @dataclass(frozen=True)
 class CodeAgentConfig:
+    """代码智能体工作流配置。"""
     repo_path: str = "."
     top_k: int = 5
     candidate_k: int | None = None
@@ -54,6 +58,7 @@ class CodeAgentConfig:
 
 @dataclass(frozen=True)
 class TaskProfile:
+    """分析后的任务画像。"""
     kind: str
     confidence: float
     reasons: list[str]
@@ -62,6 +67,7 @@ class TaskProfile:
 
 @dataclass(frozen=True)
 class AgentRun:
+    """工作流运行结果。"""
     task: str
     workflow: list[dict[str, str]]
     task_profile: TaskProfile
@@ -147,6 +153,7 @@ def retrieve_agent_context(
     task: str,
     config: CodeAgentConfig,
 ) -> tuple[list[SearchResult], list[SearchResult], list[SearchResult], dict]:
+    """检索并召回任务相关的代码上下文。"""
     python_files = load_python_files(config.repo_path)
     chunks = split_python_files(python_files, chunk_size=config.chunk_size, overlap=config.overlap)
     if not chunks:
@@ -201,6 +208,7 @@ def build_agent_plan(
     memories: list[AgentMemory],
     task_profile: TaskProfile,
 ) -> str:
+    """根据任务画像和检索上下文构建修改计划。"""
     files = prioritized_result_files(results)
     lines = [
         "## Agent 工作流设计",
@@ -243,6 +251,7 @@ def generate_agent_implementation(
     client: ChatClient,
     max_context_chars: int,
 ) -> str:
+    """通过 LLM 调用生成实现响应并返回。"""
     messages = build_agent_messages(task, results, memories, task_profile, max_context_chars)
     return client.complete(messages).strip()
 
@@ -254,6 +263,7 @@ def build_agent_messages(
     task_profile: TaskProfile,
     max_context_chars: int,
 ) -> list[dict[str, str]]:
+    """构建发送给 LLM 的消息列表。"""
     memory_text = format_memories(memories)
     context = format_results_as_context(results, max_context_chars=max_context_chars)
     system_prompt = """你是 RepoPilot 的代码 Agent。
@@ -286,6 +296,7 @@ def build_agent_messages(
 
 
 def render_agent_run(run: AgentRun, *, show_trace: bool = True) -> str:
+    """渲染 Agent 运行摘要。"""
     lines = [
         "RepoPilot Agent Run",
         f"Task: {run.task}",
@@ -311,6 +322,7 @@ def render_agent_run(run: AgentRun, *, show_trace: bool = True) -> str:
 
 
 def agent_run_to_dict(run: AgentRun) -> dict:
+    """将 AgentRun 序列化为字典。"""
     trace_unified = build_agent_run_trace(run)
     return {
         "task": run.task,
@@ -330,6 +342,7 @@ def agent_run_to_dict(run: AgentRun) -> dict:
 
 
 def build_agent_run_trace(run: AgentRun) -> dict:
+    """构建 Agent 运行追踪结构。"""
     flags = {
         "llm": run.agent_trace[4]["artifacts"].get("used_llm", False) if len(run.agent_trace) > 4 else False,
         "dry_run": any((item.get("artifacts") or {}).get("dry_run") for item in run.agent_trace),
@@ -380,6 +393,7 @@ def append_agent_run_log(path: str | Path, run: AgentRun) -> None:
 
 
 def workflow_as_dicts() -> list[dict[str, str]]:
+    """将 Agent 工作流步骤序列化为字典列表。"""
     return [{"name": name, "description": description} for name, description in AGENT_WORKFLOW]
 
 
@@ -397,6 +411,7 @@ def build_agent_step_trace(
     memory_written: bool,
     used_llm: bool,
 ) -> list[dict]:
+    """构建 Agent 各步骤的追踪事件列表。"""
     files = prioritized_result_files(final_results)
     skip_writes = config.dry_run or config.safe_mode
     remember_detail = (
@@ -484,6 +499,7 @@ def build_agent_step_trace(
 
 
 def render_agent_trace(agent_trace: list[dict]) -> str:
+    """渲染 Agent 追踪为 Markdown 文本。"""
     lines = ["## Agent 运行轨迹"]
     for index, item in enumerate(agent_trace, start=1):
         lines.append(f"{index}. {item['step']} [{item['status']}]: {item['detail']}")
@@ -494,6 +510,7 @@ def render_agent_trace(agent_trace: list[dict]) -> str:
 
 
 def summarize_trace_artifacts(artifacts: dict) -> str:
+    """汇总追踪产物为键值摘要字符串。"""
     parts: list[str] = []
     for key in (
         "memory_count",
@@ -517,17 +534,20 @@ def summarize_trace_artifacts(artifacts: dict) -> str:
 
 
 def build_memory_summary(task: str, results: list[SearchResult]) -> str:
+    """根据任务和搜索结果构建摘要文本。"""
     files = prioritized_result_files(results)
     file_text = ", ".join(files[:3]) if files else "no files"
     return f"任务 \"{task}\" 定位到 {file_text}"
 
 
 def prioritized_result_files(results: list[SearchResult]) -> list[str]:
+    """返回去重并按优先级排序（非测试文件优先）的结果文件路径列表。"""
     files = dedupe([str(result.chunk.file_path) for result in results])
     return sorted(files, key=lambda path: (is_test_path(path), files.index(path)))
 
 
 def build_memory_decisions(config: CodeAgentConfig, used_llm: bool, task_profile: TaskProfile) -> list[str]:
+    """根据配置、LLM 使用标志和任务画像构建决策描述字符串列表。"""
     return [
         f"任务类型: {task_profile.kind}, confidence={task_profile.confidence:.2f}",
         f"使用 Hybrid Search top_k={config.top_k}, recall_window={config.recall_window}",
@@ -537,6 +557,7 @@ def build_memory_decisions(config: CodeAgentConfig, used_llm: bool, task_profile
 
 
 def build_offline_implementation_note() -> str:
+    """构建离线模式下的实现说明，提示用户未启用 LLM 且提供后续操作建议。"""
     return (
         "未启用 LLM，因此本次 Agent 不生成具体代码补丁。"
         "请把上方计划和候选文件交给 Claude Code 继续实现，或追加 `--llm` 让 Agent 生成更详细的实施草案。"
@@ -544,6 +565,7 @@ def build_offline_implementation_note() -> str:
 
 
 def format_memories(memories: list[AgentMemory]) -> str:
+    """将 Agent 记忆列表格式化为可用于提示上下文的文本。"""
     if not memories:
         return "无相关历史记忆。"
     return "\n".join(
@@ -553,6 +575,7 @@ def format_memories(memories: list[AgentMemory]) -> str:
 
 
 def dedupe(values: list[str]) -> list[str]:
+    """对字符串列表进行稳定去重，保留首次出现的顺序。"""
     result: list[str] = []
     for value in values:
         if value not in result:
@@ -561,6 +584,7 @@ def dedupe(values: list[str]) -> list[str]:
 
 
 def analyze_task(task: str) -> TaskProfile:
+    """根据关键词对任务进行分类分析，返回任务画像。"""
     q = task.casefold()
     rules = [
         ("bugfix", ["修复", "报错", "错误", "异常", "失败", "bug", "bad case", "badcase"]),
@@ -595,6 +619,7 @@ def analyze_task(task: str) -> TaskProfile:
 
 
 def enrich_task_profile(task_profile: TaskProfile, results: list[SearchResult]) -> TaskProfile:
+    """利用仓库搜索结果丰富任务画像信息。"""
     files = prioritized_result_files(results)
     return TaskProfile(
         kind=task_profile.kind,
@@ -605,6 +630,7 @@ def enrich_task_profile(task_profile: TaskProfile, results: list[SearchResult]) 
 
 
 def build_recommended_checks(kind: str, files: list[str]) -> list[str]:
+    """根据任务类型和文件列表构建推荐的验证命令。"""
     checks: list[str] = []
     test_modules = [test_module_name(path) for path in files if is_test_path(path)]
     for module in test_modules:
@@ -625,6 +651,7 @@ def build_recommended_checks(kind: str, files: list[str]) -> list[str]:
 
 
 def test_module_name(path: str) -> str:
+    """将测试文件路径转换为 Python 模块名。"""
     normalized = path.replace("\\", "/")
     if normalized.endswith(".py"):
         normalized = normalized[:-3]

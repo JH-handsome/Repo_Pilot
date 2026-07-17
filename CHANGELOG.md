@@ -2,6 +2,15 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-07-14
+
+- 新增 `coding_rag/agent/runtime.py`，将 ASK 与 Agent 用户入口合并为统一 LLM 决策循环；模型可以直接回答，或调用 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff`。
+- 统一入口默认强制 dry-run；CLI 新增 `--execute-tools`，浏览器新增 `--allow-tool-execution` 与页面复选框双重授权，项目安全 policy 仍可强制只读。
+- CLI 移除 `--workflow-mode`、`--agent`、`--agent-exec`、`--llm`、`--dry-run`、`--safe-mode` 等旧工作流参数，不再自动创建 `.env`。
+- 浏览器前端改为单一 `POST /api/run`，移除 ASK/Agent 模式控件和旧 API，并按事件流展示模型决策、工具、安全检查和最终回答。
+- 统一 trace 新增真实 LLM/工具耗时、observation 截断、Hybrid Search 子 trace、引用范围、安全拒绝和动态 `success/dry_run/partial/failed` 状态。
+- 增加统一运行时、CLI 清理、网页授权和旧端点 404 测试；更新 README 与函数地图。
+
 ## 2026-07-11
 
 - 打通 `ReActAgentInterface.run()` 最小工具调用循环，支持结构化 JSON tool call，接入 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff`，默认 dry-run，并将工具结果写入统一 trace event。

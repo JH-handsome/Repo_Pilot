@@ -11,12 +11,15 @@ from coding_rag.agent.planner import AgentPlanRun, format_tool_specs
 
 
 class ChatClient(Protocol):
+    """聊天客户端协议。"""
     def complete(self, messages: list[dict[str, str]]) -> str:
+        """完成消息对话。"""
         ...
 
 
 @dataclass(frozen=True)
 class AgentPlanReview:
+    """智能体计划审查结果。"""
     verdict: str
     score: float
     issues: list[str]
@@ -25,6 +28,7 @@ class AgentPlanReview:
 
     @property
     def passed(self) -> bool:
+        """审查是否通过。"""
         return self.verdict == "pass" and self.score >= 0.7
 
 
@@ -36,6 +40,7 @@ def review_agent_plan(run: AgentPlanRun, client: ChatClient) -> AgentPlanReview:
 
 
 def build_agent_plan_review_messages(run: AgentPlanRun) -> list[dict[str, str]]:
+    """构造审查提示消息。"""
     system_prompt = """你是 RepoPilot 的 Agent 计划审查员。你的任务是判断一个 ReAct Agent 工作流计划是否合理、可执行、可审查。
 审查规则：
 1. 只审查计划质量，不补写新的完整计划。
@@ -75,6 +80,7 @@ def build_agent_plan_review_messages(run: AgentPlanRun) -> list[dict[str, str]]:
 
 
 def parse_agent_plan_review(raw_text: str) -> AgentPlanReview:
+    """解析审查器响应。"""
     payload = parse_json_object(raw_text)
     verdict = str(payload.get("verdict", "fail")).casefold()
     if verdict not in {"pass", "fail"}:
@@ -89,6 +95,7 @@ def parse_agent_plan_review(raw_text: str) -> AgentPlanReview:
 
 
 def parse_json_object(text: str) -> dict:
+    """从响应文本中提取 JSON 对象。"""
     try:
         payload = json.loads(text)
         return payload if isinstance(payload, dict) else {}
@@ -115,6 +122,7 @@ def parse_json_object(text: str) -> dict:
 
 
 def clamp_score(value) -> float:
+    """将评分限制在 [0.0, 1.0] 范围内。"""
     try:
         score = float(value)
     except (TypeError, ValueError):
@@ -123,12 +131,14 @@ def clamp_score(value) -> float:
 
 
 def string_list(value) -> list[str]:
+    """将列表中每个元素转为 str，非列表时返回 []。"""
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
 
 
 def candidate_files(run: AgentPlanRun) -> list[str]:
+    """从 run.final_results 的检索块中收集唯一文件路径，而非从计划步骤中收集。"""
     files: list[str] = []
     for result in run.final_results:
         path = str(result.chunk.file_path)
@@ -138,6 +148,7 @@ def candidate_files(run: AgentPlanRun) -> list[str]:
 
 
 def render_agent_plan_review(review: AgentPlanReview) -> str:
+    """将审查结论、评分、通过状态、问题与建议格式化为 Markdown 风格的审查文本。"""
     lines = [
         "## Agent 计划审查",
         f"- verdict: {review.verdict}",

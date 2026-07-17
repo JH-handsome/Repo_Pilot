@@ -25,6 +25,7 @@ class SearchResult:
 class BM25Retriever:
     """Hybrid Search retriever."""
     def __init__(self, chunks: list[CodeChunk], tokenizer: CodeTokenizer | None = None):
+        """构建 BM25 索引，初始化分词器、代码块和元数据倒排索引。"""
         if not chunks:
             raise ValueError("chunks must not be empty")
 
@@ -47,6 +48,7 @@ class BM25Retriever:
         self.index_by_key = {chunk_key(chunk): index for index, chunk in enumerate(chunks)}
 
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        """对查询进行混合评分并返回 Top-K 多样化搜索结果。"""
         if top_k <= 0:
             return []
 
@@ -116,6 +118,7 @@ class BM25Retriever:
 
 
 def chunk_to_document(chunk: CodeChunk) -> str:
+    """将代码块转换为包含文件路径和文本内容的文档字符串。"""
     return f"{chunk.file_path}\n{chunk.text}"
 
 
@@ -128,6 +131,7 @@ def chunk_to_metadata_document(chunk: CodeChunk, repo_index: RepoIndex | None = 
 
 
 def normalize_scores(scores) -> list[float]:
+    """将分数列表归一化到 [0,1] 区间。"""
     values = [float(score) for score in scores]
     if not values:
         return []
@@ -138,6 +142,7 @@ def normalize_scores(scores) -> list[float]:
 
 
 def token_overlap_score(query_tokens: set[str], document_tokens: set[str]) -> float:
+    """计算查询词元在文档词元中的覆盖率（交集 / 查询词元数）。"""
     if not query_tokens or not document_tokens:
         return 0.0
     return len(query_tokens & document_tokens) / len(query_tokens)
@@ -154,10 +159,12 @@ def adjust_score_for_document_role(score: float, query_tokens: set[str], path: o
 
 
 def has_test_intent(query_tokens: set[str]) -> bool:
+    """检测查询词元是否包含测试意图关键词。"""
     return bool(query_tokens & TEST_QUERY_TOKENS)
 
 
 def is_test_path(path: object) -> bool:
+    """检测路径是否符合测试文件命名惯例。"""
     normalized = normalize_path(path)
     filename = normalized.rsplit("/", 1)[-1]
     return (
@@ -169,10 +176,12 @@ def is_test_path(path: object) -> bool:
 
 
 def normalize_path(path: object) -> str:
+    """统一路径分隔符并转为小写。"""
     return str(path).replace("\\", "/").casefold()
 
 
 def diversify_by_file(ranked_indexes: list[int], chunks: list[CodeChunk], top_k: int) -> list[int]:
+    """优先选择不同文件，不足时用文件内候补补齐。"""
     selected: list[int] = []
     selected_files: set[str] = set()
     deferred: list[int] = []
@@ -197,4 +206,5 @@ def diversify_by_file(ranked_indexes: list[int], chunks: list[CodeChunk], top_k:
 
 
 def chunk_key(chunk: CodeChunk) -> tuple[object, int, int]:
+    """构建由文件路径和起止行号组成的代码块身份元组。"""
     return (chunk.file_path, chunk.start_line, chunk.end_line)

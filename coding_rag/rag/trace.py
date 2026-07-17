@@ -24,6 +24,7 @@ def build_retrieval_trace(
     include_text: bool = False,
 ) -> dict[str, Any]:
     """构建单次 RAG 检索轨迹。"""
+    # 统一 trace 的外壳是 run/events/artifacts；旧 summary/stages 仍保留给现有消费者兼容。
     context_blocks = compact_results_for_context(final_results)
     params = params or {}
     summary = {
@@ -77,6 +78,7 @@ def build_trace_run(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the run-level envelope shared by all trace producers."""
+    # run 只放本次执行的摘要信息；每个具体阶段的细节放在 events/artifacts。
     return {
         "run_id": run_id or str(uuid4()),
         "mode": mode,
@@ -101,6 +103,7 @@ def build_trace_event(
     duration_ms: int | None = None,
 ) -> dict[str, Any]:
     """Build one normalized step/tool event."""
+    # event 是定位问题的最小单位：输入、摘要、产物、错误和耗时都挂在同一个结构里。
     return {
         "step": step,
         "status": status,
@@ -179,6 +182,7 @@ def build_tool_event(
     input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Convert executor tool results into a normalized event."""
+    # 工具事件会把安全检查、截断信息、patch 文件变更等诊断字段放进 artifacts。
     status = "success" if int(result.get("returncode") or 0) == 0 else "failed"
     artifacts: dict[str, Any] = {"tool": tool}
     if tool == "run_command":
@@ -222,6 +226,7 @@ def build_tool_event(
 
 
 def normalize_event_status(status: str) -> str:
+    """将 done/drafted/planned 映射为 success，保留 skipped，否则返回原状态。"""
     if status in {"done", "drafted", "planned"}:
         return "success"
     if status in {"skipped"}:
@@ -230,6 +235,7 @@ def normalize_event_status(status: str) -> str:
 
 
 def summarize_artifact_counts(artifacts: dict[str, Any]) -> dict[str, Any]:
+    """从工件中提取固定的计数字段形成摘要。"""
     summary: dict[str, Any] = {}
     for key in ("seed_count", "recalled_count", "final_count", "candidate_file_count", "memory_count"):
         if key in artifacts:
@@ -238,6 +244,7 @@ def summarize_artifact_counts(artifacts: dict[str, Any]) -> dict[str, Any]:
 
 
 def serialize_results(results: list[SearchResult], *, include_text: bool = False) -> list[dict[str, Any]]:
+    """序列化搜索结果，包含排名和来源元数据。"""
     return [
         serialize_result(result, rank=index, include_text=include_text)
         for index, result in enumerate(results, start=1)
@@ -250,6 +257,7 @@ def serialize_result(
     rank: int | None = None,
     include_text: bool = False,
 ) -> dict[str, Any]:
+    """将单个搜索结果序列化为追踪字典。"""
     chunk = result.chunk
     row: dict[str, Any] = {
         "rank": rank,
@@ -270,6 +278,7 @@ def serialize_context_blocks(
     *,
     include_text: bool = False,
 ) -> list[dict[str, Any]]:
+    """序列化压缩后的上下文块及其来源信息。"""
     rows: list[dict[str, Any]] = []
     for index, block in enumerate(blocks, start=1):
         row: dict[str, Any] = {
@@ -330,6 +339,7 @@ def render_trace_report(trace: dict[str, Any], *, limit: int = 10) -> str:
 
 
 def render_event_trace_report(trace: dict[str, Any], *, limit: int = 10) -> str:
+    """将事件跟踪数据渲染为 Markdown 报告。"""
     run = trace.get("run") or {}
     events = trace.get("events") or []
     lines = [
@@ -357,7 +367,8 @@ def get_retrieval_stages(trace: dict[str, Any]) -> dict[str, list[dict[str, Any]
     """Return retrieval stages from either new artifacts or legacy fields."""
     artifacts = trace.get("artifacts") or {}
     retrieval = artifacts.get("retrieval")
-    if isinstance(retrieval, dict):
+    stage_names = {"initial_search", "neighbor_recall", "final_filter", "context_compaction"}
+    if isinstance(retrieval, dict) and stage_names.intersection(retrieval):
         return retrieval
     stages = trace.get("stages")
     if isinstance(stages, dict):
@@ -366,6 +377,7 @@ def get_retrieval_stages(trace: dict[str, Any]) -> dict[str, list[dict[str, Any]
 
 
 def render_trace_row(row: dict[str, Any], *, compact: bool = False) -> str:
+    """渲染单行检索追踪信息，返回格式化字符串。"""
     location = f"{row['file']}:{row['start_line']}-{row['end_line']}"
     if compact:
         source_text = ",".join(row.get("sources", []))
@@ -381,12 +393,14 @@ def render_trace_row(row: dict[str, Any], *, compact: bool = False) -> str:
 
 
 def write_trace_json(path: str | Path, trace: dict[str, Any]) -> None:
+    """将 trace 字典写入 JSON 文件，自动创建父目录并确保 UTF-8 编码。"""
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def preview_text(text: str, max_chars: int = 120) -> str:
+    """将多行文本压缩为单行预览，超出指定长度时截断并追加省略号。"""
     preview = " ".join(line.strip() for line in text.splitlines() if line.strip())
     if len(preview) <= max_chars:
         return preview

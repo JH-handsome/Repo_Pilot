@@ -20,6 +20,7 @@ class ReadOnlyAgentTools:
     """Repo-bound read-only tools used before full Agent execution exists."""
 
     def __init__(self, repo_path: str | Path, *, chunk_size: int = 40, overlap: int = 5):
+        """绑定仓库路径并初始化工具缓存。"""
         self.repo_path = Path(repo_path).resolve()
         self.chunk_size = chunk_size
         self.overlap = overlap
@@ -28,6 +29,7 @@ class ReadOnlyAgentTools:
         self._repo_index: RepoIndex | None = None
 
     def call(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        """调度支持的只读工具并拒绝未知工具。"""
         args = arguments or {}
         if name == "search_code":
             return self.search_code(
@@ -55,6 +57,7 @@ class ReadOnlyAgentTools:
         raise AgentToolError(f"Unknown read-only Agent tool: {name}")
 
     def search_code(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """对仓库进行排序检索。"""
         if not query.strip() or top_k <= 0:
             return []
         results = self.retriever.search(query, top_k=top_k)
@@ -79,6 +82,7 @@ class ReadOnlyAgentTools:
         start_line: int | None = None,
         end_line: int | None = None,
     ) -> dict[str, Any]:
+        """验证仓库路径并返回所请求行范围及元数据。"""
         file_path = self.resolve_repo_path(path)
         if not file_path.exists():
             raise AgentToolError(f"File not found: {path}")
@@ -102,6 +106,7 @@ class ReadOnlyAgentTools:
         }
 
     def list_files(self, pattern: str = "**/*.py", limit: int = 200) -> list[str]:
+        """列出仓库文件，排除忽略目录，遵守数量限制。"""
         if limit <= 0:
             return []
         if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
@@ -117,6 +122,7 @@ class ReadOnlyAgentTools:
         return files
 
     def inspect_symbol(self, symbol: str, context_lines: int = 3) -> list[dict[str, Any]]:
+        """定位指定符号并返回其源代码上下文与元数据。"""
         needle = symbol.strip().casefold()
         if not needle:
             return []
@@ -151,6 +157,7 @@ class ReadOnlyAgentTools:
         return matches
 
     def resolve_repo_path(self, path: str) -> Path:
+        """解析仓库内路径并拒绝越权访问。"""
         if not path:
             raise AgentToolError("path is required")
         candidate = Path(path)
@@ -162,6 +169,7 @@ class ReadOnlyAgentTools:
         return resolved
 
     def display_path(self, path: Path) -> str:
+        """将路径解析为相对于仓库根目录的格式，若无法相对则返回绝对路径。"""
         try:
             return str(path.resolve().relative_to(self.repo_path)).replace("\\", "/")
         except ValueError:
@@ -169,6 +177,7 @@ class ReadOnlyAgentTools:
 
     @property
     def chunks(self) -> list[CodeChunk]:
+        """懒加载并缓存仓库代码片段。"""
         if self._chunks is None:
             python_files = load_python_files(self.repo_path)
             self._chunks = split_python_files(
@@ -180,6 +189,7 @@ class ReadOnlyAgentTools:
 
     @property
     def retriever(self) -> BM25Retriever:
+        """惰性构建并缓存基于仓库代码块的 BM25 检索器。"""
         if self._retriever is None:
             if not self.chunks:
                 raise AgentToolError("No Python code chunks found in repository")
@@ -188,6 +198,7 @@ class ReadOnlyAgentTools:
 
     @property
     def repo_index(self) -> RepoIndex:
+        """惰性构建并缓存仓库符号索引。"""
         if self._repo_index is None:
             self._repo_index = build_repo_index(self.chunks)
         return self._repo_index
@@ -212,6 +223,7 @@ STOP_WORDS = {
 
 
 def extract_task_identifiers(task: str, *, limit: int = 3) -> list[str]:
+    """从任务中提取有意义的规范化标识符，同时过滤常见词。"""
     identifiers: list[str] = []
     seen: set[str] = set()
     for match in IDENTIFIER_RE.finditer(task):
@@ -227,6 +239,7 @@ def extract_task_identifiers(task: str, *, limit: int = 3) -> list[str]:
 
 
 def format_observations(observations: list[dict[str, Any]]) -> str:
+    """将只读工具观察结果字典渲染为用于提示的文本。"""
     if not observations:
         return "(no observations)"
     lines: list[str] = []
@@ -252,6 +265,7 @@ def format_observations(observations: list[dict[str, Any]]) -> str:
 
 
 def format_location(item: dict[str, Any]) -> str:
+    """将路径和可选的起止行号格式化为源码位置字符串。"""
     path = item.get("path")
     start = item.get("start_line")
     end = item.get("end_line")
@@ -261,6 +275,7 @@ def format_location(item: dict[str, Any]) -> str:
 
 
 def optional_int(value: object) -> int | None:
+    """将非空值转换为 int，并将 None/空字符串映射为 None。"""
     if value in (None, ""):
         return None
     return int(value)
