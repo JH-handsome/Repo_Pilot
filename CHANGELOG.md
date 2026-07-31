@@ -2,6 +2,14 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-07-31
+
+- `requirements.txt` 增加相互兼容的 LangChain、LangGraph 与 Pydantic 版本区间。
+- 新增 `coding_rag/agent/langchain_tools.py`：仅暴露严格 Pydantic schema 的 `search_code`、`read_file` 两个 `StructuredTool`，校验后统一委托 RepoPilot 的 `AgentExecutor.call()`，不提供写工具或通用工具名透传。
+- 新增 `coding_rag/agent/graph_runtime.py`：使用可序列化 `GraphState`、四个显式节点和条件边实现有界只读循环；复用 Hybrid Search、结果压缩、引用范围/校验、统一 trace 与 `UnifiedRun`，并将模型、工具、路由和步数错误收敛为 `failed` 或 `partial`。
+- 保留现有 `coding_rag/agent/runtime.py`、CLI 和前端不变；未使用 LangChain 的 `create_agent`、`AgentExecutor` 或 `ToolNode`，未接入写工具、流式执行、检查点或记忆。
+- 新增 `tests/test_graph_runtime.py`，覆盖严格参数 schema、执行入口、直答/工具循环、路径边界、工具与模型错误、非法/多重调用、步数上限、上下文压缩、引用校验、状态序列化和公开结果兼容性。
+
 ## 2026-07-14
 
 - 新增 `coding_rag/agent/runtime.py`，将 ASK 与 Agent 用户入口合并为统一 LLM 决策循环；模型可以直接回答，或调用 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff`。

@@ -82,6 +82,42 @@ CLI 和浏览器共用的统一 LLM 决策循环。
 - `finish_unified_run(...)`: 计算摘要并完成统一运行结果。
 - `unified_run_to_dict(run)`: 生成 CLI/HTTP 共用的响应结构。
 
+### `coding_rag/agent/langchain_tools.py`
+
+只暴露两个仓库只读能力的 LangChain `StructuredTool` 适配层。
+
+- `READONLY_LANGCHAIN_TOOL_NAMES`: 稳定工具顺序，仅包含 `search_code`、`read_file`。
+- `_ReadOnlyToolExecutor`: 约束适配器只依赖 `call(name, arguments)` 窄入口的协议。
+- `ReadOnlyToolInput`: 开启严格类型、去除字符串首尾空白，并拒绝额外字段的参数基类。
+- `SearchCodeInput`: 要求非空查询，`top_k` 默认 5、范围 1–20。
+- `ReadFileInput`: 要求非空仓库相对路径，并约束正行号和起止顺序。
+- `ReadFileInput.validate_line_range()`: 在访问执行器前拒绝倒置行范围。
+- `build_readonly_langchain_tool_map(executor)`: 构造两个严格 schema 的工具，并把校验后参数硬编码委托给 RepoPilot `AgentExecutor.call()`。
+- `build_readonly_langchain_tools(executor)`: 按稳定顺序返回模型可见的两个只读工具。
+
+### `coding_rag/agent/graph_runtime.py`
+
+不修改手写 `runtime.py` 的 LangGraph 只读运行时；状态仅保存 JSON 可序列化数据，模型、工具和执行器由图工厂闭包注入。
+
+- `READONLY_SYSTEM_PROMPT`: 限制模型只能直接回答或使用两个只读工具，并把仓库内容标为不可信数据。
+- `READONLY_TOOL_NAMES`: 图路由允许的工具名集合。
+- `BoundToolCallingModel`、`ToolCallingChatModel`: 描述工具绑定和同步调用能力的模型协议。
+- `GraphState`: 保存序列化消息、回答/状态、调用计数、观察、引用范围、trace、图步骤和终止错误。
+- `build_graph_input(query, config)`: 构造字段完整、可序列化的初始图状态。
+- `build_readonly_graph(config, model, executor, safety_policy)`: 构建 `model/tool/finalize/safe_fallback` 四节点图；条件边拒绝未知、多重和超限调用，工具节点只回到模型节点。
+- `run_graph_query(query, config, model, executor, safety_policy)`: 有界运行只读图，复用现有 `UnifiedRun` 与公开序列化结构。
+- `build_readonly_executor(config, safety_policy)`: 复用 Hybrid Search，构造强制 dry-run 的 RepoPilot 执行器。
+- `validate_ai_message(message, response_text)`: 把无效工具调用和空回答转为结构化模型错误。
+- `ai_message_text(message)`: 提取字符串或文本块形式的模型回答。
+- `ai_message_to_decision_payload(message, response_text)`: 将 AI 消息映射为兼容 `ModelDecision` 的可序列化字段。
+- `last_ai_message(messages)`: 从序列化消息中找到最近的 AI 消息。
+- `build_tool_message(...)`: 构造带调用 ID、成败状态和不可信数据提示的工具消息。
+- `serialize_message(message)`、`json_safe(value)`: 在数据写入 GraphState 前统一转换为 JSON 安全值。
+- `fallback_error_for_state(state)`、`terminal_error(...)`: 生成未知工具、多工具调用、缺少 ID、步数上限等错误结构。
+- `fallback_status(state, error)`、`fallback_answer(error)`、`fallback_event_step(error)`: 将错误和既有观察收敛为稳定终态、回答与事件名。
+- `build_graph_trace(query, config, state)`: 复用统一 trace schema，汇总模型决策、工具观察、检索子 trace 和图步骤。
+- `messages_for_unified_run(messages)`、`message_role(message)`: 将 LangChain 消息转回现有结果结构的角色/文本列表。
+
 ### `coding_rag/agent/planner.py`
 
 ASK/Agent 分类和 ReAct 计划模式核心。
