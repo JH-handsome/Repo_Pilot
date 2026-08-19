@@ -2,6 +2,24 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-08-19
+
+- 扩展 `coding_rag/learning/models.py`：新增严格的提交、逐项审查、修改反馈、审查/反思记录、会话事件、三类 action 请求和稳定结果模型；单步验收项与逐项 findings 最多 20 条；可恢复 session 只持久化 `awaiting_submission`、`needs_revision`、`awaiting_reflection`、`completed` 四种阶段，`failed` 仅表示本回合结果。
+- 新增 `coding_rag/learning/session.py`：用一张单回合 LangGraph 统一分发 `start/submit/reflect`；`start` 复用项目拆解路线，`submit` 在预检或模型审查后等待修改/反思，`reflect` 只推进一个步骤或完成，最终图状态清除临时 `submission/reflection` 输入槽，合法反思仍保存在签名 session 中。
+- 会话由调用方保存和回传，服务端不建 checkpoint 或数据库。session 使用至少 32 字节服务端密钥计算 HMAC-SHA256，签名覆盖除 token 外的完整 canonical JSON；结构或签名无效的 session 不回显，携带有效 session 的其他处理失败会保留上一个已验证等待点。
+- 步骤审查只依据学习者报告，审查记录固定 `execution_performed=false`。模型自由文本在持久化前由服务端按当前验收项生成具体、定长的缺口与提示，原始提交不写入 session，仅保存域分离 keyed HMAC 摘要和字符数；完整请求、签名 session 与模型审查输出分别设 500,000、450,000 和 50,000 canonical JSON/字符上限，签发前还验证剩余步骤至少保留一条最小完成路径。
+- 新增 `tests/test_learning_session.py`，覆盖严格模型、启动、提交重试、反思推进、完成、阶段错配、HMAC 篡改、模型坏输出、JSON 状态和命令文本不执行；`coding_rag/learning/__init__.py` 导出稳定的会话模型、依赖和四个公开运行入口。
+- 本次仍未接入前端、HTTP API、checkpoint、数据库、文件写入或代码执行。无状态 HMAC 不阻止合法旧 session 的重放或分叉；服务重启若更换签名密钥，旧 session 会失效。
+
+## 2026-08-13
+
+- 新增 `coding_rag/learning/models.py`：以严格 Pydantic schema 定义项目画像、源码证据、4 到 6 步复现路线、教学必填字段和稳定失败结果；步骤依赖只能指向前序。
+- 新增 `coding_rag/learning/workflow.py`：使用 LangGraph 显式编排 `collect_evidence -> analyze_and_plan -> present_step`，用 LangChain `ChatPromptTemplate` 与 `PydanticOutputParser` 校验模型输出，并复用 RepoPilot Hybrid Search、只读 `read_file` 与统一 trace；executor 延迟到证据节点内构造，使损坏 policy 等初始化错误收敛为稳定 `repository_error`。
+- Learning Mode 要求每条引用写明模型所声明的 claim，并执行第二层位置校验：路径必须精确匹配，引用范围必须完整落在本次已观察范围内；未知文件、真实行号越界或未观察范围均失败且不展示部分计划。claim 的自然语言蕴含关系本次依靠提示词和人工审查，不宣称自动验证。
+- 统一 trace 记录执行器实际 `dry_run/safe_mode` 与固定的 `readonly/execution_requested/execution_enabled` 权限边界，Learning Mode 始终不请求也不启用写执行。
+- 新增 `tests/test_learning_workflow.py`，离线覆盖空白教学项与 claim、路径和步骤依赖、三节点路线、默认真实 Hybrid Search、只调用 search/read、模型异常与坏 JSON、空仓库、越界证据、损坏 policy、非有限 provider 数据清洗、安全 flags 和严格 JSON 状态。
+- 本次保持 `frontend.py`、`main.py`、现有 `runtime.py` 与 `graph_runtime.py` 不变；不开放写工具，也不需要真实 API key。
+
 ## 2026-07-31
 
 - `requirements.txt` 增加相互兼容的 LangChain、LangGraph 与 Pydantic 版本区间。

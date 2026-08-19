@@ -248,6 +248,64 @@ LLM 审查 Agent 计划合理性的模块。
 - `candidate_files(run)`: 从 run 中提取候选文件。
 - `render_agent_plan_review(review)`: 渲染审查结果。
 
+## Learning Mode
+
+### `coding_rag/learning/models.py`
+
+Learning Mode 的结构化输出契约；所有模型拒绝额外字段、隐式类型转换和空白教学列表项。
+
+- `EvidenceRef`: 将模型声明的 claim 绑定到仓库相对路径和正向行范围；拒绝空 claim、冒号、绝对路径、父目录穿越和倒置行号。claim 的自然语言蕴含关系本次不作自动判定，位置边界由运行时验证。
+- `ProjectComponent`: 组件名称、职责和至少一条源码证据。
+- `ProjectProfile`: 项目简介、技术栈、学习前置、入口和组件画像。
+- `ReproductionStep`: 单步学习目标、前序依赖、待创建文件、任务、原因、收益、验证、证据、常见问题和优化问题；单步最多 20 条验收项，保证逐项审查能落入模型输出上限。
+- `LearningPlan`: 项目画像和 4 到 6 个步骤；校验步骤 ID 唯一且依赖只指向前序。
+- `StepSubmission`: 学习者提交的实现说明与测试输出；分别限制为 12,000 和 20,000 字符，原文只在当前回合状态中使用。
+- `StepReviewFinding`、`StepReview`: 对当前步骤验收项的逐项判断与总评；`verification_scope` 固定为 `learner_reported_evidence`，结论只表示学习者报告证据是否充分。
+- `RevisionFeedback`: 从失败审查派生的缺口与最小修改提示。
+- `StepReviewRecord`、`StepReflectionRecord`、`LearningSessionEvent`: 保存连续尝试、反思和状态转换记录；审查记录固定 `execution_performed=false`，不声称执行过代码或测试。
+- `LearningSession`: 由调用方保存并逐轮回传的完整教学会话；只允许 `awaiting_submission`、`needs_revision`、`awaiting_reflection`、`completed` 四种持久阶段，并校验步骤、审查、反思与历史转换的一致性。
+- `StartLearningSessionRequest`、`SubmitLearningSessionRequest`、`ReflectLearningSessionRequest`、`LearningSessionRequest`: `start/submit/reflect` 三类严格请求及其判别联合。
+- `LearningSessionError`、`LearningSessionResult`: 单回合稳定结果；`failed` 只属于本次结果，不写入持久会话阶段，携带有效会话的失败会保留上一个等待点。
+- `LearningError`: 对调用方公开的稳定错误码与脱敏消息。
+- `LearningWorkflowResult`: 成功时返回完整路线与第一步；失败时禁止暴露未校验计划。
+- `normalize_repo_relative_path(value)`: 把路径规范为 POSIX 相对路径，并拒绝冒号、绝对路径和 `..`。
+
+### `coding_rag/learning/workflow.py`
+
+独立于 `UnifiedRun` 的项目拆解工作流；client、prompt、parser 留在图工厂闭包，executor 在 `collect_evidence` 节点内延迟构造，均不进入只保存 JSON 数据的 `LearningState`。
+
+- `LearningChatClient`: 声明现有 `complete(messages) -> str` 客户端协议。
+- `LearningSearchProvider`: 声明可调用的 `(query, top_k) -> list | dict` 搜索 provider；dict 使用 `results` 和可选 `retrieval_trace`。
+- `LearningWorkflowConfig`: 配置仓库路径、Hybrid Search、切片和上下文上限。
+- `LearningState`: 保存学习目标、证据目录、结构化计划、第一步、检索子 trace、安全 flags、路线和错误。
+- `build_learning_input(learning_goal, learner_level)`: 构造字段完整的初始纯数据状态。
+- `build_learning_graph(config, client, search_provider)`: 构建 `collect_evidence -> analyze_and_plan -> present_step` 三节点图；任一失败立即结束。
+- `run_learning_workflow(...)`: 运行一次拆解并返回 `LearningWorkflowResult`。
+- `build_learning_prompt()`: 用 LangChain `ChatPromptTemplate` 组合教学规则、不可信源码边界和结构化格式说明。
+- `build_learning_executor(config, search_provider)`: 复用 RepoPilot Hybrid Search 和只读文件能力，执行器不暴露给模型。
+- `collect_repository_evidence(...)`: 搜索后再次通过安全 `read_file` 固化精确路径、范围、总行数和文本。
+- `normalize_search_payload(payload)`: 兼容完整 Hybrid Search 和基础只读搜索的结果形状。
+- `compact_evidence(rows, max_context_chars)`: 只按完整代码行压缩上下文，并同步收窄可引用范围。
+- `build_evidence_catalog(evidence)`: 建立精确路径到真实总行数和已观察范围的可信目录。
+- `validate_plan_evidence(plan, catalog)`: 拒绝虚构路径、真实文件越界和本次未观察的引用范围。
+- `build_learning_trace(config, state)`: 复用统一 trace 外壳记录检索、规划、展示和失败路线。
+- `default_learning_safety_flags()` / `learning_executor_flags(executor)`: 记录实际 dry-run 策略和固定只读边界。
+- `coding_rag/learning/__init__.py`: 导出计划工作流、教学会话的严格数据模型，以及 `LearningSessionDependencies`、`run_learning_session()` 和三个 action 便捷入口；会话图构建器与签名辅助函数不属于公开导出面。
+
+### `coding_rag/learning/session.py`
+
+无服务端持久化的可恢复教学会话。每次调用统一进入一张 LangGraph，只处理一个 `start`、`submit` 或 `reflect` action，并在下一个需要学习者输入的等待点结束；调用方负责保存结果中返回的完整 session，并在下一轮原样回传。
+
+- `LearningSessionDependencies`: 注入第 30 次任务的计划工作流配置、LLM client、至少 32 字节的服务端签名密钥、可选搜索 provider 和会话 ID 工厂；这些运行依赖不会进入图状态。
+- `run_learning_session(request, dependencies)`: 统一公开入口；先限制请求体积、解析严格判别联合并验证 session 签名，再调用单回合图。在总请求未超限且 action 可识别时，即使其他字段无效，只要嵌套 session 结构和签名可信也返回原等待点；结构或签名无效的 session 不回显。
+- `start_learning_session(...)`: 复用项目拆解工作流生成路线，签发 session，并停在第一步 `awaiting_submission`。
+- `submit_learning_session(...)`: 对当前步骤的实现说明与测试输出做非空预检和结构化审查；未通过时停在 `needs_revision`，通过时停在 `awaiting_reflection`。
+- `reflect_learning_session(...)`: 只在 `awaiting_reflection` 接收非空优化回答；推进一个步骤至 `awaiting_submission`，或在最后一步进入 `completed`。
+- LangGraph 路线：`START -> dispatch` 后按 action 进入 `start_session`、`validate_submission -> review_submission -> apply_review` 或 `apply_reflection`，最后统一经过 `finalize -> END`；最终图状态会清除本回合临时 `submission/reflection` 输入槽，合法反思仍写入签名 session 的反思记录。
+- 完整性边界：session 的 `integrity_token` 是 HMAC-SHA256；签名覆盖除 token 自身之外的完整 canonical JSON。审查记录只保存域分离的 keyed HMAC 提交摘要、字符数和按当前验收项生成的定长具体反馈，不持久化模型自由文本或原始提交。
+- 资源边界：完整请求 canonical JSON 上限为 500,000 字符，签名 session 上限为 450,000 canonical JSON 字符，单次模型审查输出上限为 50,000 字符；每次签发还会模拟“剩余每步一次通过 + 最短反思”，拒绝没有最小完成空间的状态。字段级长度限制仍由严格 Pydantic 模型执行。
+- 安全边界：步骤审查只依据学习者报告，`execution_performed` 恒为 `false`；公开 trace 只展示仓库名，不暴露服务端绝对路径。未接入前端、API、checkpoint、数据库、文件写入或代码执行。无状态签名只检测篡改，不提供重放或分叉防护；服务重启若更换签名密钥，旧 session 会失效。
+
 ## RAG 与 LLM 模块
 
 ### `coding_rag/rag/ask.py`
