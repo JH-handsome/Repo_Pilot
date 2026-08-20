@@ -1,6 +1,6 @@
 # RepoPilot Learning Mode 浏览器接入设计
 
-日期：2026-08-20  
+日期：2026-08-20
 任务：第 32 次，Learning Mode 浏览器/API 接入与单用户演示闭环
 
 ## 目标
