@@ -63,6 +63,30 @@ python frontend.py --allow-tool-execution
 
 响应包含 `status`、`answer`、`execution`、`summary` 和统一 `trace`。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
 
+### Learning Mode 浏览器教学
+
+首页的“项目学习”模式会基于仓库源码生成 4 到 6 步复现路线，并按 `start -> submit -> reflect` 一次推进一个人机等待点。当前步骤会展示学习目标、任务、原因、收益、验收项、源码证据、常见问题和优化问题。
+
+Learning Mode 使用独立的 `POST /api/learning/session`，不会改变 `/api/run` 的普通问答与工具授权契约：
+
+```json
+{
+  "repo_path": ".",
+  "provider": "deepseek",
+  "top_k": 8,
+  "recall_window": 2,
+  "request": {
+    "action": "start",
+    "learning_goal": "从零复现 RepoPilot 的只读检索链路",
+    "learner_level": "beginner"
+  }
+}
+```
+
+后续 `submit` 或 `reflect` 请求要在 `request` 中原样带回上一轮返回的完整 `session`。接口返回 `status`、`session`、`current_step`、`next_action`、`review`、`feedback` 和 `trace`；业务失败也使用这个稳定结构，因此携带有效 session 时可以停在原等待点继续修改。
+
+教学模式始终只读：学习者粘贴的实现说明、命令和测试输出只作为报告证据，不会被执行，也不受 `--allow-tool-execution` 影响。session 只保存在当前页面内存，页面刷新后重新开始；服务进程重启会更换临时 HMAC 密钥，使旧 session 失效。当前本地 HTTP 服务没有 TLS、鉴权或多用户隔离，不应直接暴露到公网。
+
 最简单的交互式入口：
 
 ```bash

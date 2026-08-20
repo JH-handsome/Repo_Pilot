@@ -1,14 +1,20 @@
-"""RepoPilot browser frontend for the unified LLM tool workflow."""
+"""Serve RepoPilot's unified Agent workflow and read-only Learning sessions."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query, unified_run_to_dict
+from coding_rag.learning import (
+    LearningSessionDependencies,
+    LearningWorkflowConfig,
+    run_learning_session,
+)
 from coding_rag.rag.llm_client import OpenAICompatibleChatClient, build_llm_config
 from coding_rag.rag.prompt import GenerationMode
 from coding_rag.tools.env import load_dotenv
@@ -16,6 +22,15 @@ from coding_rag.tools.env import load_dotenv
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+MAX_REQUEST_BODY_BYTES = 1024 * 1024
+
+
+class RequestBodyTooLarge(ValueError):
+    """表示 HTTP 请求体在读取前已经超过公开上限。"""
+
+
+class UnsupportedMediaType(ValueError):
+    """表示 API 请求没有使用 application/json。"""
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,6 +50,8 @@ def parse_args() -> argparse.Namespace:
 class RepoPilotServer(ThreadingHTTPServer):
     """RepoPilot 多线程 HTTP 服务器。"""
     allow_tool_execution: bool = False
+    # 每个 Python 服务进程只生成一次，既不注入 HTML，也不进入任何响应或日志。
+    learning_signing_key: bytes = secrets.token_bytes(32)
 
 
 class RepoPilotHandler(BaseHTTPRequestHandler):
@@ -47,15 +64,29 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
         self.send_html(build_index_html(self.server_allows_execution()))
 
     def do_POST(self) -> None:
-        """处理 /api/run 的 POST 请求，解析 JSON 并执行前端查询。"""
-        if urlparse(self.path).path != "/api/run":
+        """分发普通查询与只读教学会话请求。"""
+        path = urlparse(self.path).path
+        if path not in {"/api/run", "/api/learning/session"}:
             self.send_error(404)
             return
         try:
-            response = run_frontend_query(
-                self.read_json(),
-                server_allows_execution=self.server_allows_execution(),
-            )
+            payload = self.read_json()
+            if path == "/api/learning/session":
+                response = run_learning_frontend_request(
+                    payload,
+                    signing_key=self.server_learning_signing_key(),
+                )
+            else:
+                response = run_frontend_query(
+                    payload,
+                    server_allows_execution=self.server_allows_execution(),
+                )
+        except RequestBodyTooLarge as error:
+            self.send_json({"ok": False, "error": str(error)}, status=413)
+            return
+        except UnsupportedMediaType as error:
+            self.send_json({"ok": False, "error": str(error)}, status=415)
+            return
         except PermissionError as error:
             self.send_json({"ok": False, "error": str(error)}, status=403)
             return
@@ -63,23 +94,60 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": str(error)}, status=400)
             return
         except RuntimeError as error:
-            self.send_json({"ok": False, "error": str(error)}, status=502)
+            message = (
+                "Learning Mode service is temporarily unavailable"
+                if path == "/api/learning/session"
+                else str(error)
+            )
+            self.send_json({"ok": False, "error": message}, status=502)
             return
         except Exception as error:
-            self.send_json({"ok": False, "error": str(error)}, status=500)
+            message = (
+                "Learning Mode request failed"
+                if path == "/api/learning/session"
+                else str(error)
+            )
+            self.send_json({"ok": False, "error": message}, status=500)
             return
-        self.send_json({"ok": True, **response})
+        if path == "/api/learning/session":
+            # 会话状态机的预期失败属于业务结果，始终保留 HTTP 200。
+            self.send_json(response)
+        else:
+            self.send_json({"ok": True, **response})
 
     def server_allows_execution(self) -> bool:
         """读取服务器是否允许工具执行的开关。"""
         return bool(getattr(self.server, "allow_tool_execution", False))
 
-    def read_json(self) -> dict:
-        """按 Content-Length 读取并解析 UTF-8 JSON 请求体。"""
+    def server_learning_signing_key(self) -> bytes:
+        """读取仅保存在服务端进程内的教学会话签名密钥。"""
+        signing_key = getattr(self.server, "learning_signing_key", None)
+        if not isinstance(signing_key, bytes) or len(signing_key) < 32:
+            raise RuntimeError("Learning Mode signing service is unavailable")
+        return signing_key
 
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length).decode("utf-8")
-        return json.loads(body or "{}")
+    def read_json(self) -> dict:
+        """只接受 application/json，并在读取前限制请求体大小。"""
+        if self.headers.get_content_type() != "application/json":
+            # JSON Content-Type 会触发跨站预检，避免普通网页以 simple request
+            # 直接驱动本机已授权的工具或产生付费模型调用。
+            raise UnsupportedMediaType("Content-Type must be application/json")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Content-Length must be a non-negative integer") from error
+        if length < 0:
+            raise ValueError("Content-Length must be a non-negative integer")
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise RequestBodyTooLarge("request body exceeds the 1 MiB limit")
+        try:
+            body = self.rfile.read(length).decode("utf-8")
+            payload = json.loads(body or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("request body must be valid UTF-8 JSON") from error
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        return payload
 
     def send_html(self, html: str) -> None:
         """以 UTF-8 HTML 响应发送文本。"""
@@ -142,6 +210,64 @@ def run_frontend_query(payload: dict, *, server_allows_execution: bool = False) 
     response = unified_run_to_dict(run)
     response["execution"]["server_allowed"] = server_allows_execution
     return response
+
+
+def run_learning_frontend_request(payload: dict, *, signing_key: bytes) -> dict:
+    """把浏览器外层配置适配成一次严格、只读的 Learning Session 调用。"""
+    if not isinstance(payload, dict):
+        raise ValueError("Learning Mode payload must be a JSON object")
+    if "execute_tools" in payload:
+        raise ValueError("Learning Mode does not accept execute_tools")
+
+    request = payload.get("request")
+    if not isinstance(request, dict):
+        raise ValueError("Learning Mode request is required and must be a JSON object")
+
+    timeout = frontend_integer(payload, "timeout", 60)
+    max_tokens = frontend_integer(payload, "max_tokens", 6000)
+    if timeout <= 0:
+        raise ValueError("timeout must be greater than zero")
+    if max_tokens <= 0:
+        raise ValueError("max_tokens must be greater than zero")
+
+    workflow_config = LearningWorkflowConfig(
+        repo_path=str(payload.get("repo_path") or ".").strip(),
+        top_k=frontend_integer(payload, "top_k", 8),
+        chunk_size=frontend_integer(payload, "chunk_size", 40),
+        overlap=frontend_integer(payload, "overlap", 5),
+        recall_window=frontend_integer(payload, "recall_window", 2),
+        max_context_chars=frontend_integer(payload, "max_context_chars", 12000),
+    )
+    load_dotenv()
+    llm_config = build_llm_config(
+        provider=str(payload.get("provider") or "deepseek").strip(),
+        model=empty_to_none(payload.get("model")),
+        base_url=empty_to_none(payload.get("base_url")),
+        api_key_env=empty_to_none(payload.get("api_key_env")),
+        timeout=timeout,
+        max_tokens=max_tokens,
+        temperature=None,
+    )
+    dependencies = LearningSessionDependencies(
+        workflow_config=workflow_config,
+        client=OpenAICompatibleChatClient(llm_config),
+        signing_key=signing_key,
+    )
+    result = run_learning_session(request, dependencies)
+    return result.model_dump(mode="json")
+
+
+def frontend_integer(payload: dict, name: str, default: int) -> int:
+    """读取浏览器整数配置，拒绝 bool 与不可解析值。"""
+    raw_value = payload.get(name)
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool) or isinstance(raw_value, float):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be an integer") from error
 
 
 def empty_to_none(value) -> str | None:
@@ -243,6 +369,15 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     }
     textarea { min-height: 130px; resize: vertical; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .hidden { display: none !important; }
+    .mode-note {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: #edf7f4;
+      color: var(--accent-strong);
+    }
+    .compact textarea { min-height: 92px; }
     .toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-weight: 600; }
     .toggle input { width: auto; }
     .toggle.disabled { color: var(--muted); }
@@ -263,6 +398,18 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     .block { border-top: 1px solid var(--line); padding: 14px 0; }
     .block:first-child { border-top: 0; padding-top: 0; }
     h2 { margin: 0 0 8px; font-size: 15px; }
+    h3 { margin: 12px 0 6px; font-size: 14px; }
+    ul, ol { margin: 7px 0; padding-left: 22px; }
+    li { margin: 4px 0; }
+    .badge {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e7eeec;
+      color: var(--accent-strong);
+      font-size: 12px;
+    }
     pre {
       margin: 8px 0 0;
       padding: 12px;
@@ -289,10 +436,32 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
   </header>
   <main>
     <section class="controls">
+      <label for="appMode">使用模式</label>
+      <select id="appMode">
+        <option value="ask">代码问答</option>
+        <option value="learning">项目学习</option>
+      </select>
       <label for="repo">仓库路径</label>
       <input id="repo" value="." />
-      <label for="query">问题或需求</label>
-      <textarea id="query" placeholder="例如：解释 BM25 索引流程，或修复 ASK 没有调用 LLM 的问题"></textarea>
+      <div id="askControls">
+        <label for="query">问题或需求</label>
+        <textarea id="query" placeholder="例如：解释 BM25 索引流程，或修复 ASK 没有调用 LLM 的问题"></textarea>
+      </div>
+      <div id="learningControls" class="hidden">
+        <label for="learningGoal">学习目标</label>
+        <textarea id="learningGoal" placeholder="例如：从零复现 RepoPilot，并理解每个模块为什么这样设计"></textarea>
+        <div class="mode-note">教学模式始终只读。你粘贴的代码、命令和测试输出只作为学习证据，不会被执行。</div>
+        <div id="learningSubmitControls" class="compact hidden">
+          <label for="implementationSummary">本步实现说明</label>
+          <textarea id="implementationSummary" placeholder="说明你改了哪些文件、如何实现，以及为什么这样做"></textarea>
+          <label for="testOutput">已运行的测试输出</label>
+          <textarea id="testOutput" placeholder="粘贴你自己运行测试后得到的输出"></textarea>
+        </div>
+        <div id="learningReflectControls" class="compact hidden">
+          <label for="reflection">优化问题回答</label>
+          <textarea id="reflection" placeholder="结合当前步骤回答右侧显示的优化问题"></textarea>
+        </div>
+      </div>
       <div class="row">
         <div>
           <label for="topK">top-k</label>
@@ -314,7 +483,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
             <option>custom</option>
           </select>
         </div>
-        <div>
+        <div id="answerModeField">
           <label for="mode">回答风格</label>
           <select id="mode">
             <option value="judge">judge</option>
@@ -339,20 +508,44 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     const statusEl = document.getElementById("status");
     const outputEl = document.getElementById("output");
     const runBtn = document.getElementById("run");
+    const appMode = document.getElementById("appMode");
+    const askControls = document.getElementById("askControls");
+    const learningControls = document.getElementById("learningControls");
+    const learningSubmitControls = document.getElementById("learningSubmitControls");
+    const learningReflectControls = document.getElementById("learningReflectControls");
+    const answerModeField = document.getElementById("answerModeField");
+    const topKInput = document.getElementById("topK");
     const executeTools = document.getElementById("executeTools");
     const executeLabel = document.getElementById("executeLabel");
+    let requestInFlight = false;
+    let learningSession = null;
+    let learningNextAction = "start";
+    let learningLastResult = null;
 
     if (!serverAllowsExecution) {
       executeTools.disabled = true;
       executeLabel.classList.add("disabled");
       executeLabel.title = "服务未使用 --allow-tool-execution 启动";
     }
+    appMode.addEventListener("change", updateMode);
     runBtn.addEventListener("click", runTask);
     document.getElementById("query").addEventListener("keydown", event => {
       if (event.ctrlKey && event.key === "Enter") runTask();
     });
+    document.getElementById("learningGoal").addEventListener("keydown", event => {
+      if (event.ctrlKey && event.key === "Enter") runTask();
+    });
+    updateMode();
 
-    async function runTask() {
+    function runTask() {
+      if (appMode.value === "learning") return runLearningTask();
+      return runAskTask();
+    }
+
+    async function runAskTask() {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      appMode.disabled = true;
       runBtn.disabled = true;
       statusEl.textContent = "处理中...";
       outputEl.innerHTML = '<div class="status">LLM 正在判断是否需要调用工具...</div>';
@@ -373,14 +566,155 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.error || `请求失败 (${response.status})`);
-        renderRun(data);
-        statusEl.textContent = data.status === "failed" ? "失败" : "完成";
+        if (appMode.value === "ask") {
+          renderRun(data);
+          statusEl.textContent = data.status === "failed" ? "失败" : "完成";
+        }
       } catch (error) {
-        outputEl.innerHTML = `<div class="block"><h2>执行失败</h2><pre>${escapeHtml(error.message)}</pre></div>`;
-        statusEl.textContent = "失败";
+        if (appMode.value === "ask") {
+          outputEl.innerHTML = `<div class="block"><h2>执行失败</h2><pre>${escapeHtml(error.message)}</pre></div>`;
+          statusEl.textContent = "失败";
+        }
       } finally {
-        runBtn.disabled = false;
+        requestInFlight = false;
+        appMode.disabled = false;
+        if (appMode.value === "ask") runBtn.disabled = false;
+        else syncLearningControls();
       }
+    }
+
+    async function runLearningTask() {
+      if (requestInFlight || learningNextAction === "none") return;
+      const action = learningSession ? learningNextAction : "start";
+      const request = buildLearningRequest(action);
+      const payload = {
+        repo_path: value("repo"),
+        provider: value("provider"),
+        top_k: Number(value("topK")),
+        recall_window: Number(value("recall")),
+        request,
+      };
+
+      requestInFlight = true;
+      appMode.disabled = true;
+      syncLearningControls();
+      statusEl.textContent = "教学处理中...";
+      outputEl.innerHTML = '<div class="status">正在只读分析学习证据并推进到下一个等待点...</div>';
+      try {
+        const response = await fetch("/api/learning/session", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+
+        if (data.error && data.error.code === "invalid_session" && !data.session) {
+          learningSession = null;
+          learningNextAction = "start";
+        } else if (data.session) {
+          learningSession = data.session;
+          learningNextAction = data.next_action || "none";
+        } else if (!learningSession) {
+          learningNextAction = "start";
+        }
+        learningLastResult = data;
+        clearCompletedLearningInput(action, data);
+        if (appMode.value === "learning") {
+          renderLearning(data);
+          statusEl.textContent = data.status === "success" ? learningStatusText(data) : "需要处理";
+        }
+      } catch (error) {
+        if (appMode.value === "learning") {
+          outputEl.innerHTML = `<div class="block"><h2>教学请求失败</h2><pre>${escapeHtml(error.message)}</pre></div>`;
+          statusEl.textContent = "失败";
+        }
+      } finally {
+        requestInFlight = false;
+        appMode.disabled = false;
+        if (appMode.value === "learning") syncLearningControls();
+      }
+    }
+
+    function buildLearningRequest(action) {
+      if (action === "start") {
+        return {
+          action: "start",
+          learning_goal: value("learningGoal"),
+          learner_level: "beginner",
+        };
+      }
+      if (action === "submit") {
+        return {
+          action: "submit",
+          session: learningSession,
+          submission: {
+            implementation_summary: value("implementationSummary"),
+            test_output: value("testOutput"),
+          },
+        };
+      }
+      return {
+        action: "reflect",
+        session: learningSession,
+        reflection: value("reflection"),
+      };
+    }
+
+    function clearCompletedLearningInput(action, data) {
+      if (data.status !== "success" || !data.session) return;
+      if (action === "submit" && data.session.phase === "awaiting_reflection") {
+        document.getElementById("implementationSummary").value = "";
+        document.getElementById("testOutput").value = "";
+      }
+      if (action === "reflect") {
+        document.getElementById("reflection").value = "";
+        document.getElementById("implementationSummary").value = "";
+        document.getElementById("testOutput").value = "";
+      }
+    }
+
+    function updateMode() {
+      const isLearning = appMode.value === "learning";
+      askControls.classList.toggle("hidden", isLearning);
+      learningControls.classList.toggle("hidden", !isLearning);
+      answerModeField.classList.toggle("hidden", isLearning);
+      executeLabel.classList.toggle("hidden", isLearning);
+      topKInput.max = isLearning ? "20" : "50";
+      if (isLearning && Number(topKInput.value) > 20) topKInput.value = "20";
+      if (isLearning) {
+        if (learningLastResult) {
+          renderLearning(learningLastResult);
+          statusEl.textContent = learningLastResult.status === "success"
+            ? learningStatusText(learningLastResult)
+            : "需要处理";
+        } else {
+          outputEl.innerHTML = '<div class="status">填写学习目标，RepoPilot 将先拆解项目并给出第一步。</div>';
+          statusEl.textContent = "就绪";
+        }
+        syncLearningControls();
+      } else {
+        runBtn.textContent = "运行";
+        runBtn.disabled = requestInFlight;
+        statusEl.textContent = "就绪";
+        outputEl.innerHTML = '<div class="status">输入问题或需求后运行。</div>';
+      }
+    }
+
+    function syncLearningControls() {
+      const action = learningSession ? learningNextAction : "start";
+      const showSubmit = action === "submit";
+      const showReflect = action === "reflect";
+      learningSubmitControls.classList.toggle("hidden", !showSubmit);
+      learningReflectControls.classList.toggle("hidden", !showReflect);
+      document.getElementById("learningGoal").disabled = Boolean(learningSession);
+      runBtn.textContent = ({
+        start: "生成学习路线",
+        submit: "提交本步证据",
+        reflect: "提交优化回答并继续",
+        none: "学习路线已完成",
+      })[action] || "继续";
+      runBtn.disabled = requestInFlight || action === "none";
     }
 
     function renderRun(data) {
@@ -394,7 +728,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         </div>
         <div class="block">
           <h2>运行统计</h2>
-          <div class="meta">LLM=${summary.llm_call_count || 0} tools=${summary.tool_call_count || 0} observations=${summary.observation_count || 0}</div>
+          <div class="meta">LLM=${escapeHtml(summary.llm_call_count || 0)} tools=${escapeHtml(summary.tool_call_count || 0)} observations=${escapeHtml(summary.observation_count || 0)}</div>
         </div>
         ${renderTrace(data.trace)}
         ${renderSearchResults(data.trace)}
@@ -413,7 +747,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
           duration_ms: event.duration_ms,
         }, null, 2);
         return `<details class="event">
-          <summary class="${failedClass}">${index + 1}. ${escapeHtml(event.step)} [${escapeHtml(event.status)}]</summary>
+          <summary class="${failedClass}">${escapeHtml(index + 1)}. ${escapeHtml(event.step)} [${escapeHtml(event.status)}]</summary>
           <pre>${escapeHtml(detail)}</pre>
         </details>`;
       }).join("");
@@ -429,16 +763,138 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
       });
       if (!rows.length) return "";
       const html = rows.map(item => `<div class="block">
-        <h2>#${item.rank} ${escapeHtml(item.path)}:${item.start_line}-${item.end_line}</h2>
-        <div class="meta">score=${Number(item.score || 0).toFixed(4)} source=${escapeHtml(item.source)}</div>
+        <h2>#${escapeHtml(item.rank)} ${escapeHtml(item.path)}:${escapeHtml(item.start_line)}-${escapeHtml(item.end_line)}</h2>
+        <div class="meta">score=${escapeHtml(Number(item.score || 0).toFixed(4))} source=${escapeHtml(item.source)}</div>
         <pre>${escapeHtml(item.text)}</pre>
       </div>`).join("");
       return `<div class="block"><h2>代码证据</h2>${html}</div>`;
     }
 
+    function renderLearning(data) {
+      const session = data.session || learningSession;
+      const currentStep = data.current_step || currentStepFromSession(session);
+      const error = data.error || null;
+      const errorBlock = error ? `<div class="block failed">
+        <h2>本次未推进</h2>
+        <div>${escapeHtml(error.message)}</div>
+        <div class="meta">code=${escapeHtml(error.code)}</div>
+      </div>` : "";
+      const phaseBlock = session ? `<div class="block">
+        <h2>学习进度</h2>
+        <span class="badge">${escapeHtml(session.phase)}</span>
+        <span class="meta">第 ${escapeHtml(Number(session.current_step_index || 0) + 1)} / ${escapeHtml(session.plan && session.plan.steps ? session.plan.steps.length : 0)} 步</span>
+      </div>` : "";
+      const completedBlock = session && session.phase === "completed" ? `<div class="block">
+        <h2>路线完成</h2>
+        <p>你已经完成全部复现步骤和优化思考。可以刷新页面后输入新目标，开始另一条学习路线。</p>
+      </div>` : "";
+
+      outputEl.innerHTML = `
+        ${errorBlock}
+        ${phaseBlock}
+        ${session ? renderProjectProfile(session.plan && session.plan.project_profile) : ""}
+        ${session ? renderPlanOverview(session.plan, session.current_step_index, session.phase) : ""}
+        ${currentStep ? renderLearningStep(currentStep) : ""}
+        ${renderLearningReview(data.review)}
+        ${renderLearningFeedback(data.feedback)}
+        ${completedBlock}
+      ` || '<div class="status">尚未创建学习路线。</div>';
+      syncLearningControls();
+    }
+
+    function renderProjectProfile(profile) {
+      if (!profile) return "";
+      const components = Array.isArray(profile.components) ? profile.components.map(component => `
+        <div>
+          <h3>${escapeHtml(component.name)}</h3>
+          <div>${escapeHtml(component.responsibility)}</div>
+          ${renderEvidence(component.evidence)}
+        </div>
+      `).join("") : "";
+      return `<div class="block">
+        <h2>项目画像：${escapeHtml(profile.project_name)}</h2>
+        <p>${escapeHtml(profile.summary)}</p>
+        <h3>技术栈</h3>${renderList(profile.tech_stack)}
+        <h3>开始前准备</h3>${renderList(profile.prerequisites)}
+        <h3>程序入口</h3>${renderEvidence(profile.entry_points)}
+        <h3>核心组件</h3>${components}
+      </div>`;
+    }
+
+    function renderPlanOverview(plan, currentIndex, phase) {
+      if (!plan || !Array.isArray(plan.steps)) return "";
+      const items = plan.steps.map((step, index) => {
+        const marker = phase === "completed" || index < currentIndex
+          ? "已完成"
+          : (index === currentIndex ? "当前" : "待完成");
+        return `<li><span class="badge">${escapeHtml(marker)}</span>${escapeHtml(step.title)}</li>`;
+      }).join("");
+      return `<div class="block"><h2>复现路线</h2><ol>${items}</ol></div>`;
+    }
+
+    function renderLearningStep(step) {
+      return `<div class="block">
+        <h2>当前步骤：${escapeHtml(step.title)}</h2>
+        <div class="meta">step_id=${escapeHtml(step.step_id)} dependencies=${escapeHtml((step.depends_on || []).join(", ") || "无")}</div>
+        <h3>学习目标</h3><p>${escapeHtml(step.learning_goal)}</p>
+        <h3>需要创建的文件</h3>${renderList(step.files_to_create)}
+        <h3>任务</h3>${renderList(step.tasks)}
+        <h3>为什么这样做</h3><p>${escapeHtml(step.why)}</p>
+        <h3>收益</h3>${renderList(step.benefits)}
+        <h3>验收项</h3>${renderList(step.verification)}
+        <h3>源码证据</h3>${renderEvidence(step.evidence)}
+        <h3>常见问题</h3>${renderList(step.common_pitfalls)}
+        <h3>优化问题</h3><p>${escapeHtml(step.optimization_question)}</p>
+      </div>`;
+    }
+
+    function renderLearningReview(review) {
+      if (!review) return "";
+      const findings = Array.isArray(review.findings) ? review.findings.map(finding => `
+        <li>${escapeHtml(Number(finding.verification_index || 0) + 1)}. ${finding.satisfied ? "满足" : "未满足"}：${escapeHtml(finding.reason)}</li>
+      `).join("") : "";
+      return `<div class="block">
+        <h2>步骤审查：${review.passed ? "通过" : "需要修改"}</h2>
+        <div class="meta">范围=${escapeHtml(review.verification_scope)}</div>
+        <ul>${findings}</ul>
+      </div>`;
+    }
+
+    function renderLearningFeedback(feedback) {
+      if (!feedback) return "";
+      return `<div class="block">
+        <h2>最小修改提示</h2>
+        <h3>仍缺少</h3>${renderList(feedback.gaps)}
+        <h3>提示</h3><p>${escapeHtml(feedback.hint)}</p>
+      </div>`;
+    }
+
+    function renderEvidence(items) {
+      if (!Array.isArray(items) || !items.length) return '<div class="meta">暂无</div>';
+      return `<ul>${items.map(item => `<li>
+        <strong>${escapeHtml(item.path)}:${escapeHtml(item.start_line)}-${escapeHtml(item.end_line)}</strong> — ${escapeHtml(item.claim)}
+      </li>`).join("")}</ul>`;
+    }
+
+    function renderList(items) {
+      if (!Array.isArray(items) || !items.length) return '<div class="meta">暂无</div>';
+      return `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+    }
+
+    function currentStepFromSession(session) {
+      if (!session || session.phase === "completed" || !session.plan || !Array.isArray(session.plan.steps)) return null;
+      return session.plan.steps[Number(session.current_step_index || 0)] || null;
+    }
+
+    function learningStatusText(data) {
+      if (data.next_action === "submit") return "等待步骤提交";
+      if (data.next_action === "reflect") return "等待优化回答";
+      return "学习路线完成";
+    }
+
     function value(id) { return document.getElementById(id).value.trim(); }
     function escapeHtml(text) {
-      return String(text || "").replace(/[&<>"']/g, char => ({
+      return String(text ?? "").replace(/[&<>"']/g, char => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
       }[char]));
     }

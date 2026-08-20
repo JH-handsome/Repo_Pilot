@@ -21,18 +21,23 @@ CLI 统一入口，所有问题和修改需求都交给 LLM 决定直接回答�
 
 ### `frontend.py`
 
-轻量浏览器前端，只提供统一 `/api/run`，并使用服务端与页面双重执行授权。
+轻量浏览器前端，同时提供普通 Agent 的 `/api/run` 与只读教学会话的 `/api/learning/session`；两条路线保持独立输入、结果和权限边界。
 
 - `parse_args()`: 解析监听地址、端口和 `--allow-tool-execution`。
-- `RepoPilotServer`: 保存服务级工具执行授权。
+- `RequestBodyTooLarge`: 表示请求正文在读取前已经超过 1 MiB HTTP 上限。
+- `UnsupportedMediaType`: 表示请求未使用 `application/json`，用于阻止跨站 simple request 直接驱动本地 API。
+- `RepoPilotServer`: 保存服务级工具执行授权和进程内随机教学 session 签名密钥；密钥不进入公开响应。
 - `RepoPilotHandler.do_GET()`: 返回首页 HTML 或 404。
-- `RepoPilotHandler.do_POST()`: 只处理 `/api/run`，按错误类型返回 400/403/502/500。
+- `RepoPilotHandler.do_POST()`: 分流 `/api/run` 与 `/api/learning/session`；请求过大返回 413，教学业务失败仍按稳定结果返回 HTTP 200。
 - `RepoPilotHandler.server_allows_execution()`: 读取服务级执行授权。
-- `RepoPilotHandler.read_json()`: 读取并解析请求体 JSON。
+- `RepoPilotHandler.server_learning_signing_key()`: 读取至少 32 字节的进程内教学签名密钥。
+- `RepoPilotHandler.read_json()`: 只接受 `application/json`，再在读取前限制 Content-Length，并解析 UTF-8 JSON object。
 - `RepoPilotHandler.send_html()`: 返回 HTML 页面。
 - `RepoPilotHandler.send_json()`: 返回 JSON API 响应。
 - `RepoPilotHandler.log_message()`: 静默 HTTP server 默认日志。
 - `run_frontend_query(payload, server_allows_execution)`: 校验双重授权并运行统一 LLM 工具循环。
+- `run_learning_frontend_request(payload, signing_key)`: 把浏览器外层仓库/LLM 配置适配为现有严格 `LearningSessionRequest`，调用只读 `run_learning_session()` 并返回 JSON-safe 结果；明确拒绝 `execute_tools`。
+- `frontend_integer(payload, name, default)`: 读取浏览器整数配置，拒绝 bool 和不可解析值。
 - `empty_to_none(value)`: 将表单空值规范化为 `None`。
 - `configure_utf8_stdio()`: 将前端服务帮助文本输出配置为 UTF-8。
 - `build_index_html(allow_tool_execution)`: 将服务执行能力注入前端页面。
@@ -304,7 +309,7 @@ Learning Mode 的结构化输出契约；所有模型拒绝额外字段、隐式
 - LangGraph 路线：`START -> dispatch` 后按 action 进入 `start_session`、`validate_submission -> review_submission -> apply_review` 或 `apply_reflection`，最后统一经过 `finalize -> END`；最终图状态会清除本回合临时 `submission/reflection` 输入槽，合法反思仍写入签名 session 的反思记录。
 - 完整性边界：session 的 `integrity_token` 是 HMAC-SHA256；签名覆盖除 token 自身之外的完整 canonical JSON。审查记录只保存域分离的 keyed HMAC 提交摘要、字符数和按当前验收项生成的定长具体反馈，不持久化模型自由文本或原始提交。
 - 资源边界：完整请求 canonical JSON 上限为 500,000 字符，签名 session 上限为 450,000 canonical JSON 字符，单次模型审查输出上限为 50,000 字符；每次签发还会模拟“剩余每步一次通过 + 最短反思”，拒绝没有最小完成空间的状态。字段级长度限制仍由严格 Pydantic 模型执行。
-- 安全边界：步骤审查只依据学习者报告，`execution_performed` 恒为 `false`；公开 trace 只展示仓库名，不暴露服务端绝对路径。未接入前端、API、checkpoint、数据库、文件写入或代码执行。无状态签名只检测篡改，不提供重放或分叉防护；服务重启若更换签名密钥，旧 session 会失效。
+- 安全边界：步骤审查只依据学习者报告，`execution_performed` 恒为 `false`；公开 trace 只展示仓库名，不暴露服务端绝对路径。会话核心不接 checkpoint、数据库、文件写入或代码执行，现由 `frontend.py` 的独立只读 API 适配。无状态签名只检测篡改，不提供重放或分叉防护；服务重启若更换签名密钥，旧 session 会失效。
 
 ## RAG 与 LLM 模块
 

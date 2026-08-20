@@ -39,13 +39,14 @@ def answer_decision(answer="完成"):
 
 
 class FrontendTest(unittest.TestCase):
-    def test_index_contains_only_unified_workflow_controls(self):
+    def test_index_keeps_unified_workflow_controls_alongside_learning_mode(self):
         self.assertIn("RepoPilot", INDEX_HTML)
         self.assertIn('fetch("/api/run"', INDEX_HTML)
         self.assertIn('id="executeTools"', INDEX_HTML)
         self.assertIn("serverAllowsExecution", INDEX_HTML)
         self.assertIn("Trace Events", INDEX_HTML)
-        self.assertNotIn("workflowMode", INDEX_HTML)
+        self.assertIn("项目学习", INDEX_HTML)
+        self.assertIn('/api/learning/session', INDEX_HTML)
         self.assertNotIn("useLlm", INDEX_HTML)
         self.assertNotIn("/api/ask", INDEX_HTML)
         self.assertNotIn("/api/agent-plan", INDEX_HTML)

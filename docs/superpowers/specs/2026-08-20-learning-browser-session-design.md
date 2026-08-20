@@ -78,7 +78,7 @@ reflect -> 回答优化问题并推进一步
 
 - 原 `/api/run` 契约和双重执行授权保持不变。
 - Learning 业务结果统一返回 JSON；`LearningSessionResult.status/error` 表达业务失败，使有效旧 session 可以被页面继续使用。
-- HTTP 层在读取完整正文前检查 `Content-Length`，超限返回 413。
+- HTTP 层只接受 `application/json`，并在读取完整正文前检查 `Content-Length`；媒体类型错误返回 415，超限返回 413。
 - 非 JSON、配置错误或缺少服务依赖返回稳定的 4xx/5xx 响应，不回显密钥或底层异常细节。
 - Learning Mode 不接受或转发 `execute_tools`，即使服务以 `--allow-tool-execution` 启动也始终只读。
 
@@ -114,4 +114,3 @@ reflect -> 回答优化问题并推进一步
 - 页面刷新恢复、服务重启恢复、数据库、checkpoint、账户或多用户隔离。
 - 文件上传、跨设备同步、流式输出、生产部署、TLS、鉴权或限流。
 - 自动创建学习项目、执行测试、应用补丁或运行学习者命令。
-

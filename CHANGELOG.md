@@ -2,6 +2,14 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-08-20
+
+- 浏览器新增独立 `POST /api/learning/session`，把仓库/LLM 配置适配到第 31 次的严格 `start/submit/reflect` 会话入口；原 `/api/run`、双重工具授权和旧 404 边界保持不变。
+- 首页新增“项目学习”模式：在页面内存中保存签名 session，按 `next_action` 展示实现提交、修改反馈或优化反思，并渲染项目画像、步骤原因、收益、验收项、证据和常见问题。刷新页面后重新开始，不使用浏览器存储、数据库或 checkpoint。
+- `RepoPilotServer` 在进程内生成临时 HMAC 密钥，Learning Mode 不接受 `execute_tools`，也不执行学习者粘贴的代码、命令或测试输出；服务重启后旧 session 会稳定失效。
+- HTTP JSON 入口只接受 `application/json`，并增加读取前 1 MiB 限制、UTF-8/JSON object 校验，避免跨站 simple request 直接驱动本地服务；页面增加问答/教学共用的单请求 busy 锁，并对仓库、模型与学习者文本统一转义。
+- 新增 `tests/test_learning_frontend.py` 并更新前端回归，离线覆盖连续 action、预检、模型失败、篡改 session、HTTP 200 业务失败、413 请求上限、密钥不泄露、只读边界和页面内存状态。
+
 ## 2026-08-19
 
 - 扩展 `coding_rag/learning/models.py`：新增严格的提交、逐项审查、修改反馈、审查/反思记录、会话事件、三类 action 请求和稳定结果模型；单步验收项与逐项 findings 最多 20 条；可恢复 session 只持久化 `awaiting_submission`、`needs_revision`、`awaiting_reflection`、`completed` 四种阶段，`failed` 仅表示本回合结果。
