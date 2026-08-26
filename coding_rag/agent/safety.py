@@ -60,12 +60,11 @@ MAX_TIMEOUT_SECONDS = 300
 
 @dataclass(frozen=True)
 class SafetyDecision:
-    """不可变的安全决策记录，包含允许/拒绝/试运行结果及匹配的规则元数据。"""
+    """不可变的安全决策记录，包含允许/拒绝结果及匹配的规则元数据。"""
 
     allowed: bool
     reason: str
     matched_rule: str | None = None
-    dry_run: bool = False
     metadata: dict = field(default_factory=dict)
 
 
@@ -73,18 +72,12 @@ class SafetyDecision:
 class AgentSafetyPolicy:
     """不可变的安全限制与允许/拒绝策略配置。"""
 
-    dry_run: bool = False
     safe_mode: bool = False
     command_timeout_seconds: int = 60
     max_output_chars: int = 20000
     max_patch_chars: int = 200000
     allowlist: tuple[tuple[str, ...], ...] = DEFAULT_ALLOWED_COMMAND_PREFIXES
     denylist: tuple[tuple[str, ...], ...] = DEFAULT_DENIED_COMMAND_PREFIXES
-
-    @property
-    def no_execute(self) -> bool:
-        """dry_run 或 safe_mode 任一为真时返回 True。"""
-        return self.dry_run or self.safe_mode
 
 
 class AgentSafetyGuard:
@@ -95,12 +88,14 @@ class AgentSafetyGuard:
         self.policy = policy or AgentSafetyPolicy()
 
     def check_command(self, cmd: str) -> SafetyDecision:
-        """解析命令并应用拒绝/允许规则返回 SafetyDecision；仅允许时附带解析参数与试运行标志。"""
+        """解析命令并应用 safe-mode、拒绝与允许规则。"""
         # 检查顺序很重要：先拒绝 shell 组合语法，再看 denylist，最后才看 allowlist。
         args = parse_command(cmd)
         normalized = normalize_args(args)
         if not normalized:
             return SafetyDecision(False, "cmd is required")
+        if self.policy.safe_mode:
+            return SafetyDecision(False, "safe mode blocks command execution", "safe-mode")
 
         if SHELL_META_PATTERN.search(cmd):
             return SafetyDecision(False, "shell composition and redirection are not allowed", "shell-meta")
@@ -117,21 +112,28 @@ class AgentSafetyGuard:
             True,
             "command allowed",
             command_rule_name(allowed),
-            dry_run=self.policy.no_execute,
             metadata={"args": args},
         )
 
     def check_patch(self, diff: str) -> SafetyDecision:
-        """检查补丁路径及删除数量是否符合安全策略，返回安全/试运行决策。"""
+        """检查补丁路径、safe-mode 及删除数量是否符合安全策略。"""
         # patch 安全检查只看“能不能被 Agent 尝试”，真正能否应用由 git apply --check 再判断。
         if not diff.strip():
             return SafetyDecision(False, "diff is required")
+        if self.policy.safe_mode:
+            return SafetyDecision(False, "safe mode blocks patch execution", "safe-mode")
         if len(diff) > self.policy.max_patch_chars:
             return SafetyDecision(False, "diff exceeds max patch size", "max-patch-chars")
         if "GIT binary patch" in diff or "Binary files " in diff:
             return SafetyDecision(False, "binary patches are not allowed", "binary-patch")
 
         changed_files, deleted_files = inspect_patch_paths(diff)
+        if not changed_files:
+            return SafetyDecision(
+                False,
+                "patch must include diff --git headers with identifiable files",
+                "missing-patch-files",
+            )
         for path in changed_files:
             if is_unsafe_patch_path(path):
                 return SafetyDecision(False, f"unsafe patch path: {path}", "unsafe-path")
@@ -149,7 +151,6 @@ class AgentSafetyGuard:
             True,
             "patch allowed",
             "patch-policy",
-            dry_run=self.policy.no_execute,
             metadata={
                 "changed_files": changed_files,
                 "deleted_files": deleted_files,
@@ -225,7 +226,10 @@ def inspect_patch_paths(diff: str) -> tuple[list[str], list[str]]:
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             finalize_current_file()
-            parts = line.split()
+            try:
+                parts = shlex.split(line, posix=True)
+            except ValueError:
+                parts = []
             if len(parts) >= 4:
                 for raw_path in (parts[2], parts[3]):
                     path = strip_git_prefix(raw_path)
@@ -270,6 +274,8 @@ def load_agent_safety_policy(repo_path: str | Path = ".", policy_path: str | Pat
     if not path.exists():
         return AgentSafetyPolicy()
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if "dry_run" in payload:
+        raise AgentToolError("policy field 'dry_run' is no longer supported; use safe_mode")
     allowlist = tuple(parse_rule_list(payload.get("allowlist"), DEFAULT_ALLOWED_COMMAND_PREFIXES))
     denylist = tuple(
         merge_rule_lists(
@@ -278,7 +284,6 @@ def load_agent_safety_policy(repo_path: str | Path = ".", policy_path: str | Pat
         )
     )
     return AgentSafetyPolicy(
-        dry_run=bool(payload.get("dry_run", False)),
         safe_mode=bool(payload.get("safe_mode", False)),
         command_timeout_seconds=int(payload.get("command_timeout_seconds", 60)),
         max_output_chars=int(payload.get("max_output_chars", 20000)),

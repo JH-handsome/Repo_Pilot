@@ -460,16 +460,18 @@ class LearningFrontendHttpTest(unittest.TestCase):
             payload: dict[str, Any],
             *,
             server_allows_execution: bool,
+            approval_store,
         ) -> dict[str, Any]:
             captured["payload"] = payload
             captured["server_allows_execution"] = server_allows_execution
+            captured["approval_store"] = approval_store
             return {
                 "status": "success",
                 "answer": "mock answer",
                 "execution": {"enabled": True},
             }
 
-        payload = {"repo_path": ".", "query": "修改代码", "execute_tools": True}
+        payload = {"repo_path": ".", "query": "修改代码"}
         with running_server() as (server, base_url):
             server.allow_tool_execution = True
             with patch("frontend.run_frontend_query", side_effect=fake_query):
@@ -481,6 +483,7 @@ class LearningFrontendHttpTest(unittest.TestCase):
         self.assertEqual(body["answer"], "mock answer")
         self.assertEqual(captured["payload"], payload)
         self.assertTrue(captured["server_allows_execution"])
+        self.assertIs(captured["approval_store"], server.pending_approvals)
 
     def test_same_server_runs_real_start_submit_reflect_sequence(self):
         plan = LearningPlan.model_validate(valid_plan_payload())

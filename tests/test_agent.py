@@ -93,7 +93,7 @@ class CodeAgentTest(unittest.TestCase):
             self.assertEqual(rows[0]["agent_trace"][0]["step"], "receive_task")
             self.assertEqual(rows[0]["agent_trace"][-1]["step"], "remember")
 
-    def test_agent_dry_run_skips_memory_and_run_log_writes(self):
+    def test_agent_safe_mode_skips_memory_and_run_log_writes(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "app.py").write_text("def patch_target():\n    return True\n", encoding="utf-8")
@@ -107,7 +107,7 @@ class CodeAgentTest(unittest.TestCase):
                     top_k=1,
                     memory_path=memory_path,
                     run_log_path=log_path,
-                    dry_run=True,
+                    safe_mode=True,
                 ),
             )
 
@@ -116,7 +116,7 @@ class CodeAgentTest(unittest.TestCase):
             self.assertFalse(memory_path.exists())
             self.assertFalse(log_path.exists())
             self.assertEqual(run.agent_trace[-1]["status"], "skipped")
-            self.assertTrue(run.agent_trace[-1]["artifacts"]["dry_run"])
+            self.assertTrue(run.agent_trace[-1]["artifacts"]["safe_mode"])
 
     def test_agent_skips_duplicate_memory(self):
         with TemporaryDirectory() as temp_dir:

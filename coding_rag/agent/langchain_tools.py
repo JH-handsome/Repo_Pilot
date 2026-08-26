@@ -1,7 +1,9 @@
-"""把 RepoPilot 绑定仓库的只读工具适配为 LangChain 工具。
+"""把 RepoPilot 绑定仓库的工具适配为 LangChain 工具。
 
 本模块只负责模型可见的工具名称和 Pydantic 参数校验。
 仓库访问与路径安全仍委托给 RepoPilot 的 ``AgentExecutor.call`` 入口。
+只读运行时继续使用 ``build_readonly_langchain_tools``；普通 Agent 使用
+完整工具集合，并由执行器保留逐调用授权、快照和安全策略边界。
 """
 
 from __future__ import annotations
@@ -13,9 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 READONLY_LANGCHAIN_TOOL_NAMES = ("search_code", "read_file")
+AGENT_LANGCHAIN_TOOL_NAMES = (
+    "search_code",
+    "read_file",
+    "apply_patch",
+    "run_command",
+    "inspect_diff",
+)
 
 
-class _ReadOnlyToolExecutor(Protocol):
+class _ToolExecutor(Protocol):
     """描述 RepoPilot 窄执行入口的结构化类型。"""
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -68,8 +77,36 @@ class ReadFileInput(ReadOnlyToolInput):
         return self
 
 
+class ApplyPatchInput(ReadOnlyToolInput):
+    """代码补丁工具的参数约束。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=False)
+
+    diff: str = Field(min_length=1, description="Unified diff to apply inside the repository.")
+
+
+class RunCommandInput(ReadOnlyToolInput):
+    """仓库命令工具的参数约束。"""
+
+    cmd: str = Field(min_length=1, description="Command allowed by the repository safety policy.")
+    affected_files: list[str] = Field(
+        min_length=1,
+        description="Repository-relative files that the command may modify.",
+    )
+    timeout_seconds: int | None = Field(
+        default=None,
+        ge=1,
+        le=300,
+        description="Optional command timeout in seconds.",
+    )
+
+
+class InspectDiffInput(ReadOnlyToolInput):
+    """查看当前仓库 diff；该工具不接受参数。"""
+
+
 def build_readonly_langchain_tool_map(
-    executor: _ReadOnlyToolExecutor,
+    executor: _ToolExecutor,
 ) -> dict[str, StructuredTool]:
     """构建只读运行时允许使用的两个 LangChain 工具。"""
     if executor is None:
@@ -119,7 +156,74 @@ def build_readonly_langchain_tool_map(
     return {tool.name: tool for tool in tools}
 
 
-def build_readonly_langchain_tools(executor: _ReadOnlyToolExecutor) -> list[StructuredTool]:
+def build_readonly_langchain_tools(executor: _ToolExecutor) -> list[StructuredTool]:
     """按稳定顺序返回可绑定到模型的只读工具。"""
     tool_map = build_readonly_langchain_tool_map(executor)
     return [tool_map[name] for name in READONLY_LANGCHAIN_TOOL_NAMES]
+
+
+def build_agent_langchain_tool_map(
+    executor: _ToolExecutor,
+) -> dict[str, StructuredTool]:
+    """构建普通 Agent 的完整工具集合，执行控制仍由 executor 负责。"""
+    tool_map = build_readonly_langchain_tool_map(executor)
+
+    def apply_patch(diff: str) -> Any:
+        """在执行器通过安全检查和一次性授权后应用补丁。"""
+        return executor.call("apply_patch", {"diff": diff})
+
+    def run_command(
+        cmd: str,
+        affected_files: list[str],
+        timeout_seconds: int | None = None,
+    ) -> Any:
+        """在执行器允许且安全策略通过时运行仓库命令。"""
+        arguments: dict[str, Any] = {
+            "cmd": cmd,
+            "affected_files": affected_files,
+        }
+        if timeout_seconds is not None:
+            arguments["timeout_seconds"] = timeout_seconds
+        return executor.call("run_command", arguments)
+
+    def inspect_diff() -> Any:
+        """读取当前仓库变更，不修改任何文件。"""
+        return executor.call("inspect_diff", {})
+
+    write_tools = [
+        StructuredTool.from_function(
+            func=apply_patch,
+            name="apply_patch",
+            description=(
+                "Apply a unified diff inside the repository after safety checks and "
+                "an exact one-time approval for this call."
+            ),
+            args_schema=ApplyPatchInput,
+            infer_schema=False,
+        ),
+        StructuredTool.from_function(
+            func=run_command,
+            name="run_command",
+            description=(
+                "Run one repository command if it passes the command allowlist, all "
+                "safety checks, and an exact one-time approval for this call."
+            ),
+            args_schema=RunCommandInput,
+            infer_schema=False,
+        ),
+        StructuredTool.from_function(
+            func=inspect_diff,
+            name="inspect_diff",
+            description="Inspect the current repository diff without modifying files.",
+            args_schema=InspectDiffInput,
+            infer_schema=False,
+        ),
+    ]
+    tool_map.update({tool.name: tool for tool in write_tools})
+    return tool_map
+
+
+def build_agent_langchain_tools(executor: _ToolExecutor) -> list[StructuredTool]:
+    """按稳定顺序返回普通 Agent 的完整 LangChain 工具集合。"""
+    tool_map = build_agent_langchain_tool_map(executor)
+    return [tool_map[name] for name in AGENT_LANGCHAIN_TOOL_NAMES]

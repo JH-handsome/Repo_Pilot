@@ -52,7 +52,6 @@ class CodeAgentConfig:
     memory_limit: int = 5
     run_log_path: str | Path | None = None
     max_context_chars: int = 12000
-    dry_run: bool = False
     safe_mode: bool = False
 
 
@@ -109,7 +108,7 @@ def run_code_agent(
         files=prioritized_result_files(final_results),
         decisions=build_memory_decisions(config, client is not None, task_profile),
     )
-    skip_writes = config.dry_run or config.safe_mode
+    skip_writes = config.safe_mode
     memory_written = False if skip_writes else memory_store.append_if_new(memory)
     agent_trace = build_agent_step_trace(
         task=task,
@@ -345,7 +344,6 @@ def build_agent_run_trace(run: AgentRun) -> dict:
     """构建 Agent 运行追踪结构。"""
     flags = {
         "llm": run.agent_trace[4]["artifacts"].get("used_llm", False) if len(run.agent_trace) > 4 else False,
-        "dry_run": any((item.get("artifacts") or {}).get("dry_run") for item in run.agent_trace),
         "safe_mode": any((item.get("artifacts") or {}).get("safe_mode") for item in run.agent_trace),
     }
     summary = {
@@ -356,7 +354,7 @@ def build_agent_run_trace(run: AgentRun) -> dict:
         "run_log_written": run.run_log_written,
         "candidate_files": prioritized_result_files(run.final_results),
     }
-    status = "dry_run" if flags["dry_run"] or flags["safe_mode"] else "success"
+    status = "safe_mode" if flags["safe_mode"] else "success"
     return {
         "trace_version": "1.0",
         "run": build_trace_run(
@@ -413,9 +411,9 @@ def build_agent_step_trace(
 ) -> list[dict]:
     """构建 Agent 各步骤的追踪事件列表。"""
     files = prioritized_result_files(final_results)
-    skip_writes = config.dry_run or config.safe_mode
+    skip_writes = config.safe_mode
     remember_detail = (
-        "dry-run/safe mode enabled; memory and run log writes were skipped."
+        "safe mode enabled; memory and run log writes were skipped."
         if skip_writes
         else (
             "已把本次任务摘要、相关文件和关键决策写入长期记忆。"
@@ -490,7 +488,6 @@ def build_agent_step_trace(
                 "memory_id": memory.id,
                 "memory_path": str(config.memory_path),
                 "memory_written": memory_written,
-                "dry_run": config.dry_run,
                 "safe_mode": config.safe_mode,
                 "summary": memory.summary,
             },
@@ -521,7 +518,6 @@ def summarize_trace_artifacts(artifacts: dict) -> str:
         "candidate_file_count",
         "used_llm",
         "memory_written",
-        "dry_run",
         "safe_mode",
         "memory_id",
     ):

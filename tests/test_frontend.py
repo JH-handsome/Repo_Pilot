@@ -9,10 +9,12 @@ import urllib.request
 
 from frontend import (
     INDEX_HTML,
+    PendingApprovalStore,
     RepoPilotHandler,
     RepoPilotServer,
     build_index_html,
     run_frontend_query,
+    run_frontend_rollback,
 )
 
 
@@ -42,7 +44,9 @@ class FrontendTest(unittest.TestCase):
     def test_index_keeps_unified_workflow_controls_alongside_learning_mode(self):
         self.assertIn("RepoPilot", INDEX_HTML)
         self.assertIn('fetch("/api/run"', INDEX_HTML)
-        self.assertIn('id="executeTools"', INDEX_HTML)
+        self.assertNotIn('id="executeTools"', INDEX_HTML)
+        self.assertIn("approveWrite", INDEX_HTML)
+        self.assertIn("rollbackWrite", INDEX_HTML)
         self.assertIn("serverAllowsExecution", INDEX_HTML)
         self.assertIn("Trace Events", INDEX_HTML)
         self.assertIn("项目学习", INDEX_HTML)
@@ -69,7 +73,6 @@ class FrontendTest(unittest.TestCase):
                 "repo_path": str(root),
                 "query": "你好",
                 "provider": "deepseek",
-                "execute_tools": False,
             }
             client = SequenceClient([answer_decision("你好")])
             with patch("frontend.load_dotenv"), patch("frontend.build_llm_config", return_value=object()):
@@ -82,28 +85,71 @@ class FrontendTest(unittest.TestCase):
         self.assertFalse(response["execution"]["enabled"])
         self.assertFalse(response["execution"]["server_allowed"])
 
-    def test_browser_execution_requires_server_authorization(self):
+    def test_legacy_blanket_execution_request_is_rejected(self):
         payload = {"repo_path": ".", "query": "修改代码", "execute_tools": True}
 
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(ValueError):
             run_frontend_query(payload, server_allows_execution=False)
 
-    def test_browser_execution_uses_both_authorizations(self):
+    def test_browser_write_requires_server_capability_and_one_call_approval(self):
         with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "app.py"
+            target.write_text("value = 1\n", encoding="utf-8")
+            diff = (
+                "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
+                "@@ -1 +1 @@\n-value = 1\n+value = 2\n"
+            )
             payload = {
                 "repo_path": temp_dir,
-                "query": "你好",
+                "query": "修改 value",
                 "provider": "deepseek",
-                "execute_tools": True,
             }
-            client = SequenceClient([answer_decision()])
-            with patch("frontend.load_dotenv"), patch("frontend.build_llm_config", return_value=object()):
+            client = SequenceClient([
+                json.dumps({
+                    "action": "tool", "reason": "修改", "answer": None,
+                    "tool": "apply_patch", "arguments": {"diff": diff},
+                    "expected_observation": "修改完成",
+                }, ensure_ascii=False),
+                answer_decision("修改完成"),
+            ])
+            store = PendingApprovalStore()
+            with patch("frontend.load_dotenv"), patch("frontend.build_llm_config", return_value=object()), patch(
+                "coding_rag.agent.snapshots.Path.home", return_value=root
+            ):
                 with patch("frontend.OpenAICompatibleChatClient", return_value=client):
-                    response = run_frontend_query(payload, server_allows_execution=True)
+                    pending = run_frontend_query(
+                        payload,
+                        server_allows_execution=True,
+                        approval_store=store,
+                    )
+                    content_before_approval = target.read_text(encoding="utf-8")
+                    response = run_frontend_query(
+                        {"approval_id": pending["approval_id"]},
+                        server_allows_execution=True,
+                        approval_store=store,
+                    )
+                    content_after_approval = target.read_text(encoding="utf-8")
+                    patch_event = next(
+                        event for event in response["trace"]["events"] if event["step"] == "apply_patch"
+                    )
+                    snapshot_id = patch_event["artifacts"]["patch"]["snapshot_id"]
+                    rollback = run_frontend_rollback(
+                        {"repo_path": str(root), "snapshot_id": snapshot_id},
+                        server_allows_execution=True,
+                    )
+                    content_after_rollback = target.read_text(encoding="utf-8")
+            self.assertEqual(pending["status"], "approval_required")
+            self.assertEqual(pending["approval"]["files"], ["app.py"])
+            self.assertTrue(pending["approval_id"])
+            self.assertEqual(content_before_approval, "value = 1\n")
 
         self.assertTrue(response["execution"]["requested"])
         self.assertTrue(response["execution"]["server_allowed"])
         self.assertTrue(response["execution"]["enabled"])
+        self.assertEqual(content_after_approval, "value = 2\n")
+        self.assertEqual(content_after_rollback, "value = 1\n")
+        self.assertEqual(rollback["remaining_diff"]["text"], "")
 
     def test_project_policy_can_force_browser_back_to_read_only(self):
         with TemporaryDirectory() as temp_dir:
@@ -115,7 +161,6 @@ class FrontendTest(unittest.TestCase):
                 "repo_path": str(root),
                 "query": "你好",
                 "provider": "deepseek",
-                "execute_tools": True,
             }
             client = SequenceClient([answer_decision()])
             with patch("frontend.load_dotenv"), patch("frontend.build_llm_config", return_value=object()):
@@ -124,6 +169,13 @@ class FrontendTest(unittest.TestCase):
 
         self.assertFalse(response["execution"]["enabled"])
         self.assertTrue(response["trace"]["run"]["flags"]["safe_mode"])
+
+    def test_browser_rollback_requires_server_capability(self):
+        with self.assertRaises(PermissionError):
+            run_frontend_rollback(
+                {"repo_path": ".", "snapshot_id": "0" * 24},
+                server_allows_execution=False,
+            )
 
     def test_old_http_endpoints_return_404(self):
         server = RepoPilotServer(("127.0.0.1", 0), RepoPilotHandler)

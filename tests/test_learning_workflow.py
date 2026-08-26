@@ -72,7 +72,7 @@ class RecordingExecutor:
     def __init__(self, root: Path, provider: StaticSearchProvider):
         self.delegate = AgentExecutor(
             root,
-            dry_run=True,
+            safe_mode=True,
             search_provider=provider,
         )
         self.safety = self.delegate.safety
@@ -430,7 +430,7 @@ class LearningWorkflowTest(unittest.TestCase):
         self.assertIn('"path": "app.py"', user_message["content"])
         self.assertIn("project_profile", user_message["content"])
         flags = result.trace["run"]["flags"]
-        self.assertTrue(flags["dry_run"])
+        self.assertTrue(flags["safe_mode"])
         self.assertTrue(flags["readonly"])
         self.assertFalse(flags["execution_requested"])
         self.assertFalse(flags["execution_enabled"])
@@ -583,7 +583,7 @@ class LearningWorkflowTest(unittest.TestCase):
 
         self.assertEqual(result.status, "success")
         self.assertEqual(executor.calls, ["search_code", "read_file"])
-        self.assertTrue(executor.safety.policy.no_execute)
+        self.assertTrue(executor.safety.policy.safe_mode)
         self.assertEqual(
             set(executor.calls),
             {"search_code", "read_file"},

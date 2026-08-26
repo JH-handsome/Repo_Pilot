@@ -3,7 +3,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query
+from coding_rag.agent.runtime import UnifiedRunConfig, resume_unified_query, run_unified_query
+from coding_rag.agent.snapshots import SnapshotStore
+from coding_rag.agent.safety import AgentSafetyPolicy
 from coding_rag.rag.trace import render_trace_report
 
 
@@ -40,6 +42,11 @@ class UnifiedRuntimeTest(unittest.TestCase):
         self.assertEqual(run.answer, "你好")
         self.assertEqual(run.observations, [])
         self.assertEqual([event["step"] for event in run.trace["events"]], ["model_decision", "final_answer"])
+        self.assertEqual(run.trace["params"]["runtime"], "langgraph")
+        self.assertEqual(
+            run.trace["artifacts"]["agent"]["graph_steps"],
+            ["model", "finalize"],
+        )
         self.assertIn("model_decision", render_trace_report(run.trace))
 
     def test_search_then_answer_preserves_hybrid_trace_and_citations(self):
@@ -77,7 +84,7 @@ class UnifiedRuntimeTest(unittest.TestCase):
         )
         self.assertFalse(run.trace["events"][-1]["output_summary"]["citation_issues"])
 
-    def test_patch_is_dry_run_by_default(self):
+    def test_patch_requires_approval_and_lists_files_by_default(self):
         patch_text = (
             "diff --git a/app.py b/app.py\n"
             "--- a/app.py\n"
@@ -99,18 +106,69 @@ class UnifiedRuntimeTest(unittest.TestCase):
                         arguments={"diff": patch_text},
                         expected_observation="补丁通过检查",
                     ),
-                    decision(answer="补丁已通过 dry-run 检查。"),
+                    decision(answer="补丁等待批准。"),
                 ]
             )
 
             run = run_unified_query("修改 value", UnifiedRunConfig(repo_path=root), client)
 
             self.assertEqual(target.read_text(encoding="utf-8"), "value = 1\n")
-        self.assertEqual(run.status, "dry_run")
-        patch_event = next(event for event in run.trace["events"] if event["step"] == "apply_patch")
-        self.assertFalse(patch_event["artifacts"]["patch"]["applied"])
+        self.assertEqual(run.status, "approval_required")
+        self.assertEqual(run.approval["tool"], "apply_patch")
+        self.assertEqual(run.approval["files"], ["app.py"])
+        self.assertEqual(
+            run.trace["artifacts"]["agent"]["graph_steps"],
+            ["model", "request_approval"],
+        )
+        self.assertEqual(run.trace["events"][-1]["step"], "approval_required")
 
-    def test_patch_can_apply_when_execution_is_enabled(self):
+    def test_approved_patch_applies_once_and_can_rollback(self):
+        patch_text = (
+            "diff --git a/app.py b/app.py\n"
+            "--- a/app.py\n"
+            "+++ b/app.py\n"
+            "@@ -1 +1 @@\n"
+            "-value = 1\n"
+            "+value = 2\n"
+        )
+        with TemporaryDirectory() as temp_dir, TemporaryDirectory() as snapshot_dir:
+            root = Path(temp_dir)
+            target = root / "app.py"
+            target.write_text("value = 1\n", encoding="utf-8")
+            client = SequenceClient(
+                [
+                    decision(
+                        action="tool",
+                        answer=None,
+                        tool="apply_patch",
+                        arguments={"diff": patch_text},
+                    ),
+                    decision(answer="修改已应用。"),
+                ]
+            )
+
+            config = UnifiedRunConfig(repo_path=root, snapshot_root=Path(snapshot_dir))
+            pending = run_unified_query("修改 value", config, client)
+            self.assertEqual(pending.status, "approval_required")
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 1\n")
+
+            run = resume_unified_query(
+                pending,
+                config,
+                client,
+                approval_fingerprint=pending.approval["fingerprint"],
+            )
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+            write_result = run.observations[-1]["output"]
+            self.assertIn("-value = 1", write_result["post_change_diff"]["text"])
+            self.assertIn("+value = 2", write_result["post_change_diff"]["text"])
+            rollback = SnapshotStore(root, snapshot_dir).rollback(write_result["snapshot_id"])
+            self.assertEqual(rollback["remaining_diff"]["text"], "")
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 1\n")
+        self.assertEqual(run.status, "success")
+        self.assertTrue(run.execution_enabled)
+
+    def test_project_policy_can_reject_write_approval(self):
         patch_text = (
             "diff --git a/app.py b/app.py\n"
             "--- a/app.py\n"
@@ -131,7 +189,7 @@ class UnifiedRuntimeTest(unittest.TestCase):
                         tool="apply_patch",
                         arguments={"diff": patch_text},
                     ),
-                    decision(answer="修改已应用。"),
+                    decision(answer="补丁未执行。"),
                 ]
             )
 
@@ -139,32 +197,66 @@ class UnifiedRuntimeTest(unittest.TestCase):
                 "修改 value",
                 UnifiedRunConfig(repo_path=root),
                 client,
-                execute_tools=True,
+                safety_policy=AgentSafetyPolicy(safe_mode=True),
             )
 
-            self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
-        self.assertEqual(run.status, "success")
-        self.assertTrue(run.execution_enabled)
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 1\n")
+        self.assertEqual(run.status, "failed")
+        self.assertIsNone(run.approval)
+        self.assertFalse(run.execution_requested)
+        self.assertFalse(run.execution_enabled)
 
-    def test_safety_rejection_is_recorded_and_can_recover_to_answer(self):
+    def test_pending_approval_cannot_resume_against_another_repository(self):
+        patch_text = (
+            "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n"
+            "@@ -1 +1 @@\n-value = 1\n+value = 2\n"
+        )
+        with TemporaryDirectory() as first_dir, TemporaryDirectory() as second_dir:
+            first = Path(first_dir)
+            second = Path(second_dir)
+            (first / "app.py").write_text("value = 1\n", encoding="utf-8")
+            (second / "app.py").write_text("value = 1\n", encoding="utf-8")
+            client = SequenceClient([
+                decision(
+                    action="tool",
+                    answer=None,
+                    tool="apply_patch",
+                    arguments={"diff": patch_text},
+                )
+            ])
+            pending = run_unified_query("修改 value", UnifiedRunConfig(repo_path=first), client)
+
+            with self.assertRaisesRegex(ValueError, "different repository"):
+                resume_unified_query(
+                    pending,
+                    UnifiedRunConfig(repo_path=second),
+                    client,
+                    approval_fingerprint=pending.approval["fingerprint"],
+                )
+
+            self.assertEqual((second / "app.py").read_text(encoding="utf-8"), "value = 1\n")
+
+    def test_safety_rejection_stops_before_approval(self):
         client = SequenceClient(
             [
                 decision(
                     action="tool",
                     answer=None,
                     tool="run_command",
-                    arguments={"cmd": 'python -c "print(1)"'},
+                    arguments={
+                        "cmd": 'python -c "print(1)"',
+                        "affected_files": ["artifacts/result.txt"],
+                    },
                 ),
                 decision(answer="该命令被安全策略拒绝。"),
             ]
         )
 
-        run = run_unified_query("运行危险命令", UnifiedRunConfig(), client, execute_tools=True)
+        run = run_unified_query("运行危险命令", UnifiedRunConfig(), client)
 
-        self.assertEqual(run.status, "partial")
-        command_event = next(event for event in run.trace["events"] if event["step"] == "run_command")
-        self.assertEqual(command_event["status"], "failed")
-        self.assertFalse(command_event["artifacts"]["safety"]["allowed"])
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.trace["events"][-1]["step"], "approval_rejected")
+        self.assertIn("denied by safety policy", run.trace["events"][-1]["error"]["message"])
 
     def test_invalid_json_gets_one_repair(self):
         client = SequenceClient(["not json", decision(answer="修复后的回答")])

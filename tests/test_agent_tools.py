@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import subprocess
 import unittest
 
-from coding_rag.agent.executor import AgentExecutor
+from coding_rag.agent.executor import AgentExecutor, WriteApprovalRequired
 from coding_rag.agent.safety import AgentSafetyPolicy, load_agent_safety_policy
 from coding_rag.tools.agent_readonly import AgentToolError, ReadOnlyAgentTools, extract_task_identifiers
 
@@ -102,7 +102,6 @@ class AgentToolsTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
             init_git_repo(root)
-            executor = AgentExecutor(root)
             diff = """diff --git a/app.py b/app.py
 --- a/app.py
 +++ b/app.py
@@ -114,24 +113,27 @@ class AgentToolsTest(unittest.TestCase):
  class CacheManager:
      pass
 """
+            executor, _ = approved_executor(root, "apply_patch", {"diff": diff})
 
             result = executor.apply_patch(diff)
             inspected = executor.inspect_diff()
 
         self.assertTrue(result["applied"])
+        self.assertEqual(result["affected_files"], ["app.py"])
+        self.assertIn(".strip()", result["post_change_diff"]["text"])
         self.assertIn(".strip()", inspected["stdout"])
         self.assertEqual(inspected["returncode"], 0)
 
     def test_executor_runs_command_in_repo(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
-            executor = AgentExecutor(root)
+            arguments = {"cmd": "python -m compileall app.py", "affected_files": ["app.py"]}
+            executor, _ = approved_executor(root, "run_command", arguments)
 
-            result = executor.run_command("python -m compileall app.py")
+            result = executor.run_command(**arguments)
 
         self.assertEqual(result["returncode"], 0)
         self.assertTrue(result["executed"])
-        self.assertFalse(result["dry_run"])
         self.assertFalse(result["stdout_truncated"])
 
     def test_executor_rejects_denied_command(self):
@@ -150,33 +152,50 @@ class AgentToolsTest(unittest.TestCase):
             with self.assertRaises(AgentToolError):
                 executor.run_command("python -m compileall app.py && git status")
 
-    def test_executor_dry_run_command_does_not_execute(self):
+    def test_executor_requires_exact_approval_before_command(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
-            executor = AgentExecutor(root, dry_run=True)
+            executor = AgentExecutor(root)
 
-            result = executor.run_command("python -m compileall app.py")
+            with self.assertRaises(WriteApprovalRequired) as caught:
+                executor.run_command(
+                    "python -m compileall app.py",
+                    affected_files=["app.py"],
+                )
 
-        self.assertEqual(result["returncode"], 0)
-        self.assertFalse(result["executed"])
-        self.assertTrue(result["dry_run"])
+        self.assertEqual(caught.exception.request["files"], ["app.py"])
 
-    def test_executor_safe_mode_command_does_not_execute(self):
+    def test_command_approval_is_consumed_after_one_call(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            arguments = {"cmd": "rg load_data app.py", "affected_files": ["app.py"]}
+            executor, _ = approved_executor(root, "run_command", arguments)
+
+            first = executor.run_command(**arguments)
+            with self.assertRaises(WriteApprovalRequired):
+                executor.run_command(**arguments)
+
+        self.assertTrue(first["executed"])
+
+    def test_executor_safe_mode_rejects_command(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
             executor = AgentExecutor(root, safe_mode=True)
 
-            result = executor.run_command("python -m compileall app.py")
-
-        self.assertFalse(result["executed"])
-        self.assertTrue(result["dry_run"])
+            with self.assertRaises(AgentToolError):
+                executor.run_command(
+                    "python -m compileall app.py",
+                    affected_files=["app.py"],
+                )
 
     def test_executor_truncates_command_output(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
-            executor = AgentExecutor(root, safety_policy=AgentSafetyPolicy(max_output_chars=8))
+            policy = AgentSafetyPolicy(max_output_chars=8)
+            arguments = {"cmd": "rg load_data app.py", "affected_files": ["app.py"]}
+            executor, _ = approved_executor(root, "run_command", arguments, safety_policy=policy)
 
-            result = executor.run_command("rg load_data app.py")
+            result = executor.run_command(**arguments)
 
         self.assertEqual(result["returncode"], 0)
         self.assertTrue(result["stdout_truncated"])
@@ -188,15 +207,22 @@ class AgentToolsTest(unittest.TestCase):
             (root / "test_slow.py").write_text(
                 "import time\n"
                 "import unittest\n\n"
+                "from pathlib import Path\n\n"
                 "class SlowTest(unittest.TestCase):\n"
                 "    def test_slow(self):\n"
+                "        Path('partial.txt').write_text('partial', encoding='utf-8')\n"
                 "        time.sleep(2)\n",
                 encoding="utf-8",
             )
-            executor = AgentExecutor(root, command_timeout=1)
+            arguments = {
+                "cmd": "python -m unittest test_slow",
+                "affected_files": ["partial.txt"],
+            }
+            executor, _ = approved_executor(root, "run_command", arguments, command_timeout=1)
 
             with self.assertRaises(AgentToolError):
-                executor.run_command("python -m unittest test_slow")
+                executor.run_command(**arguments)
+            self.assertFalse((root / "partial.txt").exists())
 
     def test_executor_rejects_multi_file_delete_patch(self):
         with TemporaryDirectory() as temp_dir:
@@ -219,11 +245,10 @@ deleted file mode 100644
             with self.assertRaises(AgentToolError):
                 executor.apply_patch(diff)
 
-    def test_executor_dry_run_patch_checks_without_applying(self):
+    def test_executor_rejects_mismatched_patch_approval(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
             init_git_repo(root)
-            executor = AgentExecutor(root, dry_run=True)
             diff = """diff --git a/app.py b/app.py
 --- a/app.py
 +++ b/app.py
@@ -235,13 +260,15 @@ deleted file mode 100644
  class CacheManager:
      pass
 """
+            preview = AgentExecutor(root).preview_write("apply_patch", {"diff": diff})
+            changed_diff = diff.replace(".strip()", ".upper()")
+            executor = AgentExecutor(root, write_approval=preview["fingerprint"])
 
-            result = executor.apply_patch(diff)
+            with self.assertRaises(WriteApprovalRequired):
+                executor.apply_patch(changed_diff)
             content = (root / "app.py").read_text(encoding="utf-8")
 
-        self.assertFalse(result["applied"])
-        self.assertTrue(result["dry_run"])
-        self.assertNotIn(".strip()", content)
+        self.assertNotIn(".upper()", content)
 
     def test_executor_rejects_env_patch(self):
         with TemporaryDirectory() as temp_dir:
@@ -272,6 +299,35 @@ deleted file mode 100644
 
             with self.assertRaises(AgentToolError):
                 executor.apply_patch(diff)
+
+    def test_patch_without_identifiable_files_cannot_request_approval(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            diff = """--- a/app.py
++++ b/app.py
+@@ -1 +1 @@
+-old
++new
+"""
+
+            with self.assertRaisesRegex(AgentToolError, "identifiable files"):
+                AgentExecutor(root).preview_write("apply_patch", {"diff": diff})
+
+    def test_patch_approval_lists_quoted_file_path(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "file name.py").write_text("value = 1\n", encoding="utf-8")
+            diff = """diff --git "a/file name.py" "b/file name.py"
+--- "a/file name.py"
++++ "b/file name.py"
+@@ -1 +1 @@
+-value = 1
++value = 2
+"""
+
+            request = AgentExecutor(root).preview_write("apply_patch", {"diff": diff})
+
+        self.assertEqual(request["files"], ["file name.py"])
 
     def test_policy_file_can_extend_allowlist_but_not_override_denylist(self):
         with TemporaryDirectory() as temp_dir:
@@ -316,6 +372,22 @@ def make_repo(temp_dir: str) -> Path:
 def init_git_repo(root: Path) -> None:
     subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
     subprocess.run(["git", "add", "app.py", "pkg/service.py"], cwd=root, check=True, capture_output=True, text=True)
+
+
+def approved_executor(
+    root: Path,
+    tool: str,
+    arguments: dict,
+    **executor_options,
+) -> tuple[AgentExecutor, dict]:
+    """Create an executor carrying one exact approval for a validated write."""
+    executor_options.setdefault("snapshot_root", root / ".snapshot-cache")
+    previewer = AgentExecutor(root, **executor_options)
+    request = previewer.preview_write(tool, arguments)
+    return (
+        AgentExecutor(root, write_approval=request["fingerprint"], **executor_options),
+        request,
+    )
 
 
 if __name__ == "__main__":

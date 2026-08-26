@@ -1329,8 +1329,7 @@ def build_learning_session_trace(
             params={"learner_level": state["learner_level"]},
             flags={
                 "llm": llm_used,
-                "dry_run": True,
-                "safe_mode": False,
+                "safe_mode": True,
                 "readonly": True,
                 "execution_requested": False,
                 "execution_enabled": False,

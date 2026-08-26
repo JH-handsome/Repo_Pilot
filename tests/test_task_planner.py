@@ -60,16 +60,6 @@ class DummyPlanClient:
 """
 
 
-class DummyToolClient:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.messages = None
-
-    def complete(self, messages):
-        self.messages = messages
-        return self.responses.pop(0)
-
-
 class TaskPlannerTest(unittest.TestCase):
     def test_classify_question_as_ask(self):
         plan = classify_task("Where does load_data read files?")
@@ -118,82 +108,11 @@ class TaskPlannerTest(unittest.TestCase):
         self.assertIsNotNone(run.answer)
         self.assertIn("Answer", run.answer or "")
 
-    def test_react_interface_runs_dry_run_tool_loop(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "app.py").write_text("def target():\n    return True\n", encoding="utf-8")
-            interface = ReActAgentInterface()
-            client = DummyToolClient(
-                [
-                    '{"thought":"locate code","tool":"search_code","arguments":{"query":"target","top_k":1},"expected_observation":"candidate file"}'
-                ]
-            )
-
-            run = interface.run(
-                "implement a new feature",
-                config=AgentPlanConfig(repo_path=root, top_k=1, recall_window=0),
-                client=client,
-                max_steps=1,
-            )
-
-        self.assertEqual(run.plan.mode, WorkflowMode.AGENT)
-        self.assertEqual(run.tool_calls[0].tool, "search_code")
-        self.assertEqual(run.trace["trace_version"], "1.0")
-        self.assertEqual(run.trace["events"][0]["step"], "search_code")
-        self.assertTrue(run.trace["run"]["flags"]["dry_run"])
-
-    def test_react_interface_rejects_unknown_tool(self):
+    def test_react_compatibility_interface_is_plan_only(self):
         interface = ReActAgentInterface()
-        client = DummyToolClient(
-            ['{"thought":"bad","tool":"delete_everything","arguments":{},"expected_observation":"no"}']
-        )
 
-        run = interface.run("implement a new feature", client=client, max_steps=1)
-
-        self.assertEqual(run.trace["events"][0]["status"], "failed")
-        self.assertEqual(run.trace["events"][0]["error"]["type"], "UnknownTool")
-
-    def test_react_interface_records_command_safety_rejection(self):
-        interface = ReActAgentInterface()
-        client = DummyToolClient(
-            [
-                '{"thought":"try unsafe command","tool":"run_command",'
-                '"arguments":{"cmd":"python -c \\"print(1)\\""},'
-                '"expected_observation":"command output"}'
-            ]
-        )
-
-        run = interface.run("implement a new feature", client=client, dry_run=False, max_steps=1)
-
-        self.assertEqual(run.trace["events"][0]["step"], "run_command")
-        self.assertEqual(run.trace["events"][0]["status"], "failed")
-        self.assertIn("denied", run.trace["events"][0]["error"]["message"])
-
-    def test_react_interface_loads_agent_policy_path(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            policy = root / "policy.json"
-            policy.write_text('{"allowlist": ["pytest"], "denylist": []}', encoding="utf-8")
-            interface = ReActAgentInterface()
-            client = DummyToolClient(
-                [
-                    '{"thought":"run configured check","tool":"run_command",'
-                    '"arguments":{"cmd":"pytest --version"},'
-                    '"expected_observation":"pytest version"}'
-                ]
-            )
-
-            run = interface.run(
-                "implement a new feature",
-                config=AgentPlanConfig(repo_path=root, agent_policy_path=policy),
-                client=client,
-                max_steps=1,
-            )
-
-        event = run.trace["events"][0]
-        self.assertEqual(event["status"], "success")
-        self.assertEqual(event["artifacts"]["command"]["safety"]["matched_rule"], "pytest")
-        self.assertFalse(event["artifacts"]["command"]["executed"])
+        self.assertFalse(hasattr(interface, "run"))
+        self.assertEqual(interface.plan("implement a new feature").mode, WorkflowMode.AGENT)
 
     def test_agent_plan_mode_builds_prompt_and_llm_plan(self):
         with TemporaryDirectory() as temp_dir:

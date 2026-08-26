@@ -87,7 +87,7 @@ def build_trace_run(
         "task": task,
         "repo_path": str(repo_path) if repo_path is not None else None,
         "params": params or {},
-        "flags": flags or {"llm": False, "dry_run": False, "safe_mode": False},
+        "flags": flags or {"llm": False, "safe_mode": False},
         "summary": summary or {},
     }
 
@@ -199,7 +199,9 @@ def build_tool_event(
                 "stdout_truncated",
                 "stderr_truncated",
                 "executed",
-                "dry_run",
+                "snapshot_id",
+                "affected_files",
+                "post_change_diff",
             )
             if key in result
         }
@@ -207,7 +209,9 @@ def build_tool_event(
         metadata = ((result.get("safety") or {}).get("metadata") or {})
         artifacts["patch"] = {
             "applied": result.get("applied"),
-            "dry_run": result.get("dry_run"),
+            "snapshot_id": result.get("snapshot_id"),
+            "affected_files": result.get("affected_files", []),
+            "post_change_diff": result.get("post_change_diff"),
             "changed_files": metadata.get("changed_files", []),
             "deleted_files": metadata.get("deleted_files", []),
             "deletes_files": metadata.get("deletes_files", False),

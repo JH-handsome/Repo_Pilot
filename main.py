@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query
+from coding_rag.agent.executor import AgentExecutor
+from coding_rag.agent.runtime import UnifiedRunConfig, resume_unified_query, run_unified_query
 from coding_rag.rag.llm_client import (
     OpenAICompatibleChatClient,
     available_provider_names,
@@ -41,11 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trace-out", help="保存本次统一 trace JSON")
     parser.add_argument("--trace-include-text", action="store_true", help="在检索 trace 中保留完整代码文本")
     parser.add_argument("--agent-policy", help="Agent executor 安全策略 JSON 路径")
-    parser.add_argument(
-        "--execute-tools",
-        action="store_true",
-        help="允许安全策略内的补丁落盘和命令执行；默认只做 dry-run",
-    )
+    parser.add_argument("--rollback", metavar="SNAPSHOT_ID", help="恢复一次已批准写操作的修改前快照")
     parser.add_argument(
         "--mode",
         choices=mode_choices,
@@ -73,6 +70,8 @@ def main() -> int:
     args = parse_args()
     # 入口只负责加载已有环境配置，并把任务交给统一的 LLM 决策循环。
     load_dotenv()
+    if args.rollback:
+        return run_rollback(args)
     if args.interactive or not args.repo_path or not args.query:
         return run_interactive_cli(args)
     return run_single_turn(args)
@@ -91,12 +90,23 @@ def run_single_turn(
 
     try:
         llm_client = client or build_chat_client(args)
-        run = run_unified_query(
-            args.query,
-            build_runtime_config(args),
-            llm_client,
-            execute_tools=args.execute_tools,
-        )
+        config = build_runtime_config(args)
+        run = run_unified_query(args.query, config, llm_client)
+        while run.status == "approval_required":
+            print(render_unified_run(run))
+            try:
+                approved = input("批准以上这一次写操作并真实执行？[y/N]> ").strip().casefold()
+            except EOFError:
+                approved = ""
+            if approved not in {"y", "yes", "是"}:
+                print("未批准，仓库未发生这次写操作。")
+                return 4
+            run = resume_unified_query(
+                run,
+                config,
+                llm_client,
+                approval_fingerprint=run.approval["fingerprint"],
+            )
     except ValueError as error:
         print(f"配置或输入错误: {error}", file=sys.stderr)
         print_llm_setup_hint(args.llm_provider, file=sys.stderr)
@@ -126,7 +136,7 @@ def run_interactive_cli(args: argparse.Namespace) -> int:
 
     print("RepoPilot 交互模式")
     print(f"当前仓库: {repo_path}")
-    print(f"工具执行: {'已授权' if args.execute_tools else '只读 dry-run'}")
+    print("写工具按调用逐次申请批准；Learning Mode 保持只读。")
     print("输入问题或修改需求，LLM 会自动决定直接回答或调用工具。")
     print("输入 :q、quit 或 exit 退出。")
     print()
@@ -167,6 +177,24 @@ def build_chat_client(args: argparse.Namespace) -> OpenAICompatibleChatClient:
     return OpenAICompatibleChatClient(config)
 
 
+def run_rollback(args: argparse.Namespace) -> int:
+    """Restore one repository-bound snapshot without invoking an LLM."""
+    if not args.repo_path:
+        print("使用 --rollback 时必须提供仓库路径。", file=sys.stderr)
+        return 2
+    try:
+        result = AgentExecutor(args.repo_path).rollback_snapshot(args.rollback)
+    except Exception as error:
+        print(f"恢复失败: {error}", file=sys.stderr)
+        return 3
+    print(f"已恢复快照: {result['snapshot_id']}")
+    for path in result["restored_files"]:
+        print(f"- 已还原 {path}")
+    for path in result["removed_files"]:
+        print(f"- 已移除本次操作新建的文件 {path}")
+    return 0
+
+
 def build_runtime_config(args: argparse.Namespace) -> UnifiedRunConfig:
     """将CLI参数转换为统一运行配置。"""
     return UnifiedRunConfig(
@@ -195,7 +223,7 @@ def render_unified_run(run) -> str:
         "RepoPilot 回答",
         "-" * 80,
         f"状态: {run.status}",
-        f"工具执行: {'已启用' if run.execution_enabled else '只读 dry-run'}",
+        f"写操作: {'已执行批准调用' if run.execution_enabled else '尚未执行写调用'}",
         (
             "调用统计: "
             f"LLM={summary.get('llm_call_count', 0)} "
@@ -205,6 +233,33 @@ def render_unified_run(run) -> str:
         "",
         run.answer,
     ]
+    approval = getattr(run, "approval", None)
+    if approval:
+        lines.extend(
+            [
+                "",
+                "待批准写操作:",
+                f"工具: {approval.get('tool') or '(unknown)'}",
+                "目标文件:",
+                *[f"- {path}" for path in approval.get("files") or []],
+                f"一次性批准指纹: {approval.get('fingerprint') or '(missing)'}",
+            ]
+        )
+        arguments = approval.get("arguments") or {}
+        if approval.get("tool") == "run_command":
+            lines.extend(["命令:", str(arguments.get("cmd") or "")])
+        elif approval.get("tool") == "apply_patch":
+            lines.extend(["待应用补丁:", str(arguments.get("diff") or "")])
+    for event in run.trace.get("events") or []:
+        artifacts = event.get("artifacts") if isinstance(event, dict) else None
+        artifacts = artifacts if isinstance(artifacts, dict) else {}
+        result = artifacts.get("patch") or artifacts.get("command")
+        if not isinstance(result, dict) or not result.get("snapshot_id"):
+            continue
+        lines.extend(["", f"回滚快照: {result['snapshot_id']}"])
+        post_diff = result.get("post_change_diff") or {}
+        if post_diff.get("text"):
+            lines.extend(["修改后 diff:", str(post_diff["text"])])
     return "\n".join(lines)
 
 

@@ -93,7 +93,7 @@ class RetrievalTraceTest(unittest.TestCase):
     def test_render_trace_report_accepts_unified_events_without_stages(self):
         trace = {
             "trace_version": "1.0",
-            "run": {"mode": "agent_exec", "status": "dry_run", "task": "fix bug"},
+            "run": {"mode": "agent_exec", "status": "safe_mode", "task": "fix bug"},
             "events": [
                 {
                     "step": "run_command",

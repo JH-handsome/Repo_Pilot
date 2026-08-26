@@ -8,7 +8,7 @@
 
 CLI 统一入口，所有问题和修改需求都交给 LLM 决定直接回答或调用工具。
 
-- `parse_args()`: 定义检索、回答风格、LLM、policy、trace 和 `--execute-tools` 参数；不再包含 ASK/Agent 模式参数。
+- `parse_args()`: 定义检索、回答风格、LLM、policy、trace 和 `--rollback` 参数；不再包含 ASK/Agent 模式参数或总执行授权。
 - `main()`: 加载已有 `.env`，决定进入交互模式还是单次统一运行。
 - `run_single_turn(args, client)`: 构建统一配置并调用 `run_unified_query()`。
 - `run_interactive_cli(args)`: 复用一个 LLM client 连续执行统一工作流。
@@ -26,16 +26,19 @@ CLI 统一入口，所有问题和修改需求都交给 LLM 决定直接回答�
 - `parse_args()`: 解析监听地址、端口和 `--allow-tool-execution`。
 - `RequestBodyTooLarge`: 表示请求正文在读取前已经超过 1 MiB HTTP 上限。
 - `UnsupportedMediaType`: 表示请求未使用 `application/json`，用于阻止跨站 simple request 直接驱动本地 API。
-- `RepoPilotServer`: 保存服务级工具执行授权和进程内随机教学 session 签名密钥；密钥不进入公开响应。
+- `PendingApproval`、`PendingApprovalStore`: 仅在服务端进程内保存可恢复运行状态；浏览器只拿到一次性不透明 ID，消费后立即移除。
+- `RepoPilotServer`: 保存服务级写能力、一次性批准状态和进程内随机教学 session 签名密钥；密钥不进入公开响应。
 - `RepoPilotHandler.do_GET()`: 返回首页 HTML 或 404。
-- `RepoPilotHandler.do_POST()`: 分流 `/api/run` 与 `/api/learning/session`；请求过大返回 413，教学业务失败仍按稳定结果返回 HTTP 200。
+- `RepoPilotHandler.do_POST()`: 分流 `/api/run`、`/api/rollback` 与 `/api/learning/session`；请求过大返回 413，教学业务失败仍按稳定结果返回 HTTP 200。
 - `RepoPilotHandler.server_allows_execution()`: 读取服务级执行授权。
 - `RepoPilotHandler.server_learning_signing_key()`: 读取至少 32 字节的进程内教学签名密钥。
 - `RepoPilotHandler.read_json()`: 只接受 `application/json`，再在读取前限制 Content-Length，并解析 UTF-8 JSON object。
 - `RepoPilotHandler.send_html()`: 返回 HTML 页面。
 - `RepoPilotHandler.send_json()`: 返回 JSON API 响应。
 - `RepoPilotHandler.log_message()`: 静默 HTTP server 默认日志。
-- `run_frontend_query(payload, server_allows_execution)`: 校验双重授权并运行统一 LLM 工具循环。
+- `run_frontend_query(payload, server_allows_execution, approval_store)`: 开始普通查询或消费一个服务端批准 ID；不接受总执行授权字段。
+- `prepare_frontend_run_response(...)`: 序列化运行结果，并仅在服务允许写入时保存待批准状态。
+- `run_frontend_rollback(payload, server_allows_execution)`: 按仓库和快照 ID 恢复一次已批准写操作。
 - `run_learning_frontend_request(payload, signing_key)`: 把浏览器外层仓库/LLM 配置适配为现有严格 `LearningSessionRequest`，调用只读 `run_learning_session()` 并返回 JSON-safe 结果；明确拒绝 `execute_tools`。
 - `frontend_integer(payload, name, default)`: 读取浏览器整数配置，拒绝 bool 和不可解析值。
 - `empty_to_none(value)`: 将表单空值规范化为 `None`。
@@ -71,15 +74,16 @@ Tkinter 桌面 UI，覆盖检索、LLM 回答、评测、bad case 查看和参�
 
 ### `coding_rag/agent/runtime.py`
 
-CLI 和浏览器共用的统一 LLM 决策循环。
+CLI 和浏览器共用的统一结果模型、JSON 决策协议与辅助函数；公开入口委托给 LangGraph。
 
 - `UnifiedRunConfig`: 统一运行配置，包括 Hybrid Search、回答风格、上下文限制、policy 和最大工具步数。
 - `ModelDecision`: 模型结构化决策，字段为 `action/reason/answer/tool/arguments/expected_observation`。
 - `UnifiedRun`: 最终回答、状态、决策、observation、trace 和执行授权。
-- `run_unified_query(query, config, client, execute_tools, safety_policy)`: 在 `answer` 与五个工具之间循环，处理修复、步数限制、动态状态和引用校验。
+- `run_unified_query(query, config, client, safety_policy)`: 普通 Agent 的稳定公开入口，延迟导入并委托 `run_unified_graph_query()`。
+- `resume_unified_query(pending_run, config, client, approval_fingerprint, safety_policy)`: 校验待批准状态和精确指纹后恢复一次写调用。
 - `build_hybrid_search_provider(config)`: 把 ASK 的候选检索、邻居召回和最终过滤包装为 executor 搜索 provider。
 - `serialize_search_results(results, repo_path)`: 将最终检索结果转为带相对路径和行号的工具输出。
-- `build_unified_messages(query, config, execution_enabled)`: 生成 JSON 决策协议、工具 schema 和不可信仓库数据约束。
+- `build_unified_messages(query, config)`: 生成 JSON 决策协议、工具 schema、逐调用批准规则和不可信仓库数据约束。
 - `parse_model_decision(raw_text)`: 校验模型 JSON、action、工具名和参数类型。
 - `build_unified_trace(...)`: 创建 `mode=unified` 的 run/events/artifacts 外壳。
 - `compact_tool_result(tool, result, max_chars)`: 截断发送回 LLM 和写入 trace 的 observation。
@@ -89,29 +93,35 @@ CLI 和浏览器共用的统一 LLM 决策循环。
 
 ### `coding_rag/agent/langchain_tools.py`
 
-只暴露两个仓库只读能力的 LangChain `StructuredTool` 适配层。
+同时提供 Learning Mode 只读工具表与普通 Agent 五工具表的 LangChain `StructuredTool` 适配层。
 
 - `READONLY_LANGCHAIN_TOOL_NAMES`: 稳定工具顺序，仅包含 `search_code`、`read_file`。
-- `_ReadOnlyToolExecutor`: 约束适配器只依赖 `call(name, arguments)` 窄入口的协议。
+- `AGENT_LANGCHAIN_TOOL_NAMES`: 普通 Agent 的稳定五工具顺序，增加 `apply_patch`、`run_command`、`inspect_diff`。
+- `_ToolExecutor`: 约束两套适配器都只依赖 `call(name, arguments)` 窄入口的协议。
 - `ReadOnlyToolInput`: 开启严格类型、去除字符串首尾空白，并拒绝额外字段的参数基类。
 - `SearchCodeInput`: 要求非空查询，`top_k` 默认 5、范围 1–20。
 - `ReadFileInput`: 要求非空仓库相对路径，并约束正行号和起止顺序。
 - `ReadFileInput.validate_line_range()`: 在访问执行器前拒绝倒置行范围。
+- `ApplyPatchInput`、`RunCommandInput`、`InspectDiffInput`: 写工具与 diff 查看工具的严格参数模型；补丁模型不裁剪末尾换行。
 - `build_readonly_langchain_tool_map(executor)`: 构造两个严格 schema 的工具，并把校验后参数硬编码委托给 RepoPilot `AgentExecutor.call()`。
 - `build_readonly_langchain_tools(executor)`: 按稳定顺序返回模型可见的两个只读工具。
+- `build_agent_langchain_tool_map(executor)`、`build_agent_langchain_tools(executor)`: 构造并按稳定顺序返回普通 Agent 的五工具集合；真实执行权限仍由 executor 决定。
 
 ### `coding_rag/agent/graph_runtime.py`
 
-不修改手写 `runtime.py` 的 LangGraph 只读运行时；状态仅保存 JSON 可序列化数据，模型、工具和执行器由图工厂闭包注入。
+同时承载普通 Agent 主图与 Learning Mode 可复用的只读图；状态只保存 JSON 可序列化数据，模型、工具和执行器由图工厂闭包注入。
 
 - `READONLY_SYSTEM_PROMPT`: 限制模型只能直接回答或使用两个只读工具，并把仓库内容标为不可信数据。
 - `READONLY_TOOL_NAMES`: 图路由允许的工具名集合。
 - `BoundToolCallingModel`、`ToolCallingChatModel`: 描述工具绑定和同步调用能力的模型协议。
 - `GraphState`: 保存序列化消息、回答/状态、调用计数、观察、引用范围、trace、图步骤和终止错误。
 - `build_graph_input(query, config)`: 构造字段完整、可序列化的初始图状态。
+- `UnifiedGraphState`、`build_unified_graph_input(...)`: 保存普通 Agent 的 JSON 决策、批准状态、写执行状态和五工具观察。
+- `build_unified_graph(config, client, executor, resume_approved_write)`: 构建普通 Agent 的 `model/tool/request_approval/finalize/safe_fallback` 主图，以条件边替代原手写循环。
+- `run_unified_graph_query(...)`: 加载安全 policy、构造执行器、运行或恢复主图，并生成兼容 `UnifiedRun` 的结果和 `runtime=langgraph` trace 标记。
 - `build_readonly_graph(config, model, executor, safety_policy)`: 构建 `model/tool/finalize/safe_fallback` 四节点图；条件边拒绝未知、多重和超限调用，工具节点只回到模型节点。
 - `run_graph_query(query, config, model, executor, safety_policy)`: 有界运行只读图，复用现有 `UnifiedRun` 与公开序列化结构。
-- `build_readonly_executor(config, safety_policy)`: 复用 Hybrid Search，构造强制 dry-run 的 RepoPilot 执行器。
+- `build_readonly_executor(config, safety_policy)`: 复用 Hybrid Search，构造 `safe_mode` 只读 RepoPilot 执行器。
 - `validate_ai_message(message, response_text)`: 把无效工具调用和空回答转为结构化模型错误。
 - `ai_message_text(message)`: 提取字符串或文本块形式的模型回答。
 - `ai_message_to_decision_payload(message, response_text)`: 将 AI 消息映射为兼容 `ModelDecision` 的可序列化字段。
@@ -133,7 +143,6 @@ ASK/Agent 分类和 ReAct 计划模式核心。
 - `AgentPlanConfig`: Agent 计划/执行配置，包括检索参数、只读工具开关和可选 `agent_policy_path`。
 - `AgentPlanRun`: Agent 计划运行产物。
 - `ReActAgentInterface.plan(task)`: 强制把任务规划为 Agent 模式。
-- `ReActAgentInterface.run(task)`: 执行最小 ReAct 工具循环；解析 LLM JSON tool call，默认 dry-run，并把工具调用写入统一 trace。
 - `ReActAgentInterface.build_plan(task, config, client)`: 构建 Agent 计划运行结果。
 - `classify_task(user_input, requested_mode, generation_mode)`: 按显式模式或关键词推断 ASK/Agent。
 - `infer_mode(user_input)`: 使用 fix/implement/refactor 等关键词推断模式。
@@ -141,9 +150,6 @@ ASK/Agent 分类和 ReAct 计划模式核心。
 - `run_agent_plan_mode(task, config, client, tools)`: Agent 计划流程；默认不检索，开启只读工具时收集观察。
 - `build_agent_plan_trace(task, config)`: 构造 Agent 计划 trace 骨架。
 - `collect_readonly_observations(task, config)`: 调用 `search_code`、`list_files`、`inspect_symbol` 收集只读观察。
-- `run_agent_execution_loop(task, config, client, tools, dry_run, safe_mode, max_steps, safety_policy)`: 调度 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff`，处理未知工具和安全拒绝。
-- `build_agent_execution_trace(task, config, dry_run, safe_mode)`: 生成 Agent 执行统一 trace 外壳。
-- `parse_agent_tool_call(raw_text)`: 从 LLM 输出中解析 `thought/tool/arguments/expected_observation`。
 - `default_agent_tools()`: 声明 Agent 可用工具，包括 `read_file`、`search_code`、`apply_patch`、`run_command`、`inspect_diff` 等。
 - `build_agent_plan_messages(task, plan, context, tools, observations)`: 组装发给 LLM 的 Agent 计划 prompt。
 - `format_tool_specs(tools)`: 将工具声明渲染为 prompt 文本。
@@ -156,7 +162,7 @@ ASK/Agent 分类和 ReAct 计划模式核心。
 
 代码 Agent 工作流：记忆、检索、计划、实现草案、日志和推荐验证命令。
 
-- `CodeAgentConfig`: 代码 Agent 配置，包括检索、记忆、日志、dry-run/safe-mode。
+- `CodeAgentConfig`: 代码 Agent 配置，包括检索、记忆、日志和 `safe_mode`；开启后跳过记忆与运行日志持久化。
 - `TaskProfile`: 任务画像，包括类型、置信度、原因和推荐检查。
 - `AgentRun`: 一次代码 Agent 运行的完整产物。
 - `run_code_agent(task, config, client)`: 代码 Agent 主流程。
@@ -187,12 +193,15 @@ ASK/Agent 分类和 ReAct 计划模式核心。
 Agent 工具执行器，封装可执行工具表面。
 
 - `CommandResult`: 命令执行结果数据结构。
-- `AgentExecutor.__init__(repo_path, chunk_size, overlap, command_timeout, dry_run, safe_mode, safety_policy, search_provider)`: 绑定仓库根目录、只读工具、安全策略和可选 Hybrid Search provider。
+- `WriteApprovalRequired`: 缺少或不匹配精确一次性批准时返回完整批准申请。
+- `AgentExecutor.__init__(repo_path, ..., safe_mode, safety_policy, search_provider, write_approval, snapshot_root)`: 绑定仓库根目录、只读工具、安全策略、一次性批准和外部快照库。
 - `AgentExecutor.call(name, arguments)`: 工具分发入口。
 - `AgentExecutor.read_file(path, start_line, end_line)`: 读取仓库内文件。
 - `AgentExecutor.search_code(query, top_k)`: 优先调用注入的 Hybrid Search provider，否则复用基础只读检索。
-- `AgentExecutor.apply_patch(diff)`: 经过安全检查后校验并应用 unified diff；dry-run/safe-mode 只做 `git apply --check`。
-- `AgentExecutor.run_command(cmd, timeout_seconds)`: 经过 allowlist/denylist 检查后以 `shell=False` 执行命令，并返回截断信息。
+- `AgentExecutor.preview_write(name, arguments)`: 校验写调用，列出目标文件并生成绑定完整参数的批准指纹。
+- `AgentExecutor.apply_patch(diff)`: 安全检查和 `git apply --check` 后消费批准、创建快照、应用补丁并返回修改后 diff。
+- `AgentExecutor.run_command(cmd, affected_files, timeout_seconds)`: 校验命令和声明文件，消费批准、创建快照后以 `shell=False` 执行。
+- `AgentExecutor.rollback_snapshot(snapshot_id)`: 恢复声明文件的修改前版本。
 - `AgentExecutor.inspect_diff()`: 查看当前 `git diff --no-ext-diff --`。
 - `AgentExecutor._run_git(command, stdin)`: 执行 git 子命令。
 - `run_subprocess(command, cwd, timeout, shell, stdin)`: 子进程执行封装。
@@ -201,12 +210,22 @@ Agent 工具执行器，封装可执行工具表面。
 - `decision_to_dict(decision)`: 序列化安全检查结果。
 - `optional_int(value)`: 参数转可选整数。
 
+### `coding_rag/agent/snapshots.py`
+
+仓库外的一次写调用快照库，用于生成操作专属 diff 和恢复修改前版本。
+
+- `SnapshotStore.create(paths, tool)`: 在执行前缓存每个声明文件，记录原本不存在的文件。
+- `SnapshotStore.diff(snapshot_id)`: 将当前文件与该次快照比较，生成 unified diff 或二进制变化标记。
+- `SnapshotStore.rollback(snapshot_id)`: 还原原文件并逐个移除本次新建文件。
+- `normalize_snapshot_paths(paths)`: 规范化、去重并拒绝绝对路径、盘符和父目录穿越。
+- `resolve_repo_file(repo_path, relative_path)`: 确保声明路径解析后仍位于仓库内。
+
 ### `coding_rag/agent/safety.py`
 
 Agent 可执行工具安全策略层，统一约束命令执行和 patch 应用。
 
-- `AgentSafetyPolicy`: 配置 dry-run/safe-mode、命令超时、输出截断、patch 大小、allowlist 和 denylist。
-- `SafetyDecision`: 表示安全检查结果，包括是否允许、命中规则、原因、dry-run 标记和元数据。
+- `AgentSafetyPolicy`: 配置 safe-mode、命令超时、输出截断、patch 大小、allowlist 和 denylist。
+- `SafetyDecision`: 表示安全检查结果，包括是否允许、命中规则、原因和元数据。
 - `AgentSafetyGuard.check_command(cmd)`: 解析命令，拒绝 shell 拼接/重定向、denylist 和不在 allowlist 的命令。
 - `AgentSafetyGuard.check_patch(diff)`: 检查 diff 是否为空、过大、二进制、路径越界、修改 `.env` 或批量删除文件。
 - `AgentSafetyGuard.resolve_timeout(timeout_seconds)`: 解析命令超时并限制上限。
@@ -294,7 +313,7 @@ Learning Mode 的结构化输出契约；所有模型拒绝额外字段、隐式
 - `build_evidence_catalog(evidence)`: 建立精确路径到真实总行数和已观察范围的可信目录。
 - `validate_plan_evidence(plan, catalog)`: 拒绝虚构路径、真实文件越界和本次未观察的引用范围。
 - `build_learning_trace(config, state)`: 复用统一 trace 外壳记录检索、规划、展示和失败路线。
-- `default_learning_safety_flags()` / `learning_executor_flags(executor)`: 记录实际 dry-run 策略和固定只读边界。
+- `default_learning_safety_flags()` / `learning_executor_flags(executor)`: 记录实际 safe-mode 策略和固定只读边界。
 - `coding_rag/learning/__init__.py`: 导出计划工作流、教学会话的严格数据模型，以及 `LearningSessionDependencies`、`run_learning_session()` 和三个 action 便捷入口；会话图构建器与签名辅助函数不属于公开导出面。
 
 ### `coding_rag/learning/session.py`

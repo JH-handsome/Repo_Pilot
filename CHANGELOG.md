@@ -2,6 +2,14 @@
 
 本文件用于记录 RepoPilot 每次修改的主要内容。后续修改请按时间倒序追加，重点写清楚改了什么、影响哪些文件、是否需要注意测试或配置。
 
+## 2026-08-26
+
+- 将 CLI 和浏览器共用的 `run_unified_query()` 切换为 LangGraph 主运行时；现有 OpenAI 兼容客户端继续使用可修复的 JSON 决策协议，图节点负责模型调用、工具执行、最终引用校验和安全失败收敛，原手写统一循环和旧 ReAct 执行循环均已移除。
+- 扩展 LangChain 工具适配层：普通 Agent 按稳定顺序获得 `search_code`、`read_file`、`apply_patch`、`run_command`、`inspect_diff`，所有调用仍经过 `AgentExecutor.call()`；补丁文本保留末尾换行，避免 strict schema 损坏 unified diff。
+- 移除普通 Agent 与旧离线 CodeAgent 的 `dry_run`，并移除总执行授权：`apply_patch`、`run_command` 每次都先返回 `approval_required`，同时展示目标文件、具体命令或补丁正文，并生成绑定完整参数的一次性指纹；CLI 逐次询问，浏览器只保存服务端待批准状态并消费一次性 ID。旧离线记忆/日志只读行为统一由 `safe_mode` 控制。
+- 新增仓库外快照库：批准后先缓存声明文件的修改前版本，再真实执行，返回操作专属 diff 和快照 ID；CLI/浏览器支持按 ID 回滚，命令必须声明全部 `affected_files`。
+- Learning Mode 继续使用独立只读 LangGraph，只绑定 `search_code`、`read_file`，并改用 `safe_mode` 审计只读边界；新增回归测试覆盖精确授权、防重放、快照、diff、回滚和浏览器批准链。
+
 ## 2026-08-20
 
 - 浏览器新增独立 `POST /api/learning/session`，把仓库/LLM 配置适配到第 31 次的严格 `start/submit/reflect` 会话入口；原 `/api/run`、双重工具授权和旧 404 边界保持不变。

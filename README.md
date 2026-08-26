@@ -39,9 +39,9 @@ pip install -r requirements.txt
 python frontend.py
 ```
 
-打开 `http://127.0.0.1:8765` 后直接输入问题或修改需求。LLM 会自动决定直接回答，还是调用 `search_code`、`read_file`、`apply_patch`、`run_command`、`inspect_diff`。
+打开 `http://127.0.0.1:8765` 后直接输入问题或修改需求。普通 Agent 的主运行时由 LangGraph 编排，LLM 会自动决定直接回答，还是调用 `search_code`、`read_file`、`apply_patch`、`run_command`、`inspect_diff`。
 
-浏览器默认只读。需要真实应用补丁或执行命令时，启动服务和单次请求必须同时授权：
+浏览器默认不允许执行写工具。需要真实应用补丁或执行命令时，先以写能力启动服务；模型提出写调用后，页面会列出目标文件，并要求用户只批准当前这一次调用：
 
 ```bash
 python frontend.py --allow-tool-execution
@@ -56,12 +56,11 @@ python frontend.py --allow-tool-execution
   "top_k": 5,
   "recall_window": 2,
   "provider": "deepseek",
-  "mode": "judge",
-  "execute_tools": false
+  "mode": "judge"
 }
 ```
 
-响应包含 `status`、`answer`、`execution`、`summary` 和统一 `trace`。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
+响应包含 `status`、`answer`、`execution`、`approval`、`approval_id`、`summary` 和统一 `trace`。`approval_id` 只在服务允许写入且当前状态为 `approval_required` 时返回；把它单独提交到 `/api/run` 只会批准对应调用一次。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
 
 ### Learning Mode 浏览器教学
 
@@ -112,7 +111,7 @@ python main.py /path/to/repo "你的问题" --top-k 5
 
 ```bash
 python main.py . "BM25 检索器在哪里建立索引？" --top-k 5
-python main.py . "修复统一入口的 trace 状态" --execute-tools
+python main.py . "修复统一入口的 trace 状态"
 ```
 
 默认检索流程：
@@ -195,18 +194,28 @@ python main.py . "linked list cycle" --llm-provider custom
 
 ## Agent 工作流
 
-用户不再选择 ASK 或 Agent。统一 ReAct 循环中，LLM 每轮返回 `answer` 或 `tool` 决策：
+用户不再选择 ASK 或 Agent。CLI 与浏览器都通过 `run_unified_query()` 进入普通 Agent 的 LangGraph；图中的 `model -> tool -> model` 条件循环处理每轮 `answer` 或 `tool` JSON 决策，最终进入 `finalize` 或安全失败节点：
 
 ```bash
 python main.py . "解释统一 trace 的事件顺序" --show-trace
 python main.py . "修复统一 trace 的状态计算" --trace-out artifacts/unified_run.json
-python main.py . "修复统一 trace 的状态计算" --execute-tools
-python main.py . "修复统一 trace 的状态计算" --execute-tools --agent-policy .repopilot/policy.json
+python main.py . "修复统一 trace 的状态计算"
+python main.py . "修复统一 trace 的状态计算" --agent-policy .repopilot/policy.json
 ```
 
-默认情况下，`apply_patch` 只运行 `git apply --check`，`run_command` 不启动子进程。`--execute-tools` 只解除本次默认 dry-run；项目 policy 中的 `dry_run` 或 `safe_mode` 仍可强制只读，denylist 始终优先。
+`apply_patch` 和 `run_command` 没有 dry-run 分支。每个写调用先经过路径、补丁、allowlist/denylist 等安全检查，再进入 `approval_required`；CLI/浏览器会同时展示目标文件、具体命令或补丁正文。授权绑定工具名和完整参数的 SHA-256 指纹，只能消费一次。批准后，执行器先在仓库外缓存声明文件的修改前版本，再真实执行并返回操作专属 diff 与快照 ID。`safe_mode` 仍可强制拒绝写调用，denylist 始终优先。
 
-统一 trace 依次记录 `model_decision`、工具事件和 `final_answer`，包含耗时、检索阶段、输出截断、安全决策、补丁文件和命令结果。状态可能是 `success`、`dry_run`、`partial` 或 `failed`。
+CLI 会在每次写调用前提示确认。需要恢复时使用执行结果中的快照 ID：
+
+```bash
+python main.py /path/to/repo --rollback SNAPSHOT_ID
+```
+
+浏览器会在修改后直接展示 diff，并提供“恢复到修改前”按钮。`run_command` 必须在 `affected_files` 中声明所有可能修改的仓库相对路径；快照与回滚保证只覆盖这些已声明文件。
+
+普通 Agent 的 LangChain 工具适配层公开五个严格命名工具；实际仓库访问仍统一进入 `AgentExecutor.call()`。Learning Mode 使用另一套只读图和工具表，只绑定 `search_code`、`read_file`，不会因普通 Agent 获得写工具而改变权限。
+
+统一 trace 依次记录 `model_decision`、`approval_required`、工具事件和 `final_answer`，包含耗时、检索阶段、输出截断、安全决策、快照、修改后 diff 和命令结果。状态可能是 `success`、`approval_required`、`partial` 或 `failed`。
 
 旧 Agent 计划与审查函数继续供离线评测使用，不再作为 CLI 或浏览器工作流。计划测试集仍可通过以下命令维护：
 

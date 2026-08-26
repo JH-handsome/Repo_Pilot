@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from coding_rag.agent.executor import AgentExecutor
-from coding_rag.agent.safety import AgentSafetyPolicy, load_agent_safety_policy
 from coding_rag.rag.ask import (
     AskModeConfig,
     AskModeRun,
@@ -21,7 +17,7 @@ from coding_rag.tools.agent_readonly import ReadOnlyAgentTools, extract_task_ide
 from coding_rag.tools.bm25 import SearchResult
 from coding_rag.rag.citation_validator import append_citation_validation_report, validate_answer_citations
 from coding_rag.rag.prompt import GenerationMode, format_results_as_context
-from coding_rag.rag.trace import build_tool_event, build_trace_event, build_trace_run
+from coding_rag.rag.trace import build_trace_event, build_trace_run
 
 
 class WorkflowMode(str, Enum):
@@ -94,32 +90,8 @@ class AgentPlanRun:
     observations: list[dict]
 
 
-@dataclass(frozen=True)
-class AgentToolCall:
-    """智能体工具调用数据类。"""
-
-    thought: str
-    tool: str
-    arguments: dict
-    expected_observation: str
-    raw_text: str
-
-
-@dataclass(frozen=True)
-class AgentExecutionRun:
-    """智能体执行运行结果数据类。"""
-
-    task: str
-    plan: TaskPlan
-    trace: dict
-    messages: list[dict[str, str]]
-    tool_calls: list[AgentToolCall]
-    observations: list[dict]
-    final_text: str | None
-
-
 class ReActAgentInterface:
-    """Agent 模式接口，支持计划生成与带安全约束的工具执行循环。"""
+    """向后兼容的 Agent 规划接口；执行统一由 LangGraph runtime 负责。"""
 
     def __init__(self, tools: list[AgentToolSpec] | None = None):
         """初始化接口，注入可用工具列表。"""
@@ -128,27 +100,6 @@ class ReActAgentInterface:
     def plan(self, task: str) -> TaskPlan:
         """委托任务分类生成执行计划。"""
         return classify_task(task, requested_mode=WorkflowMode.AGENT)
-
-    def run(
-        self,
-        task: str,
-        config: AgentPlanConfig | None = None,
-        client: ChatClient | None = None,
-        *,
-        dry_run: bool = True,
-        safe_mode: bool = False,
-        max_steps: int = 3,
-    ) -> AgentExecutionRun:
-        """执行计划的工具调用循环。"""
-        return run_agent_execution_loop(
-            task,
-            config=config or AgentPlanConfig(),
-            client=client,
-            tools=self.tools,
-            dry_run=dry_run,
-            safe_mode=safe_mode,
-            max_steps=max_steps,
-        )
 
     def build_plan(
         self,
@@ -375,225 +326,6 @@ def collect_readonly_observations(task: str, config: AgentPlanConfig) -> list[di
     return observations
 
 
-def run_agent_execution_loop(
-    task: str,
-    config: AgentPlanConfig,
-    client: ChatClient | None,
-    tools: list[AgentToolSpec] | None = None,
-    *,
-    dry_run: bool = True,
-    safe_mode: bool = False,
-    max_steps: int = 3,
-    safety_policy: AgentSafetyPolicy | None = None,
-) -> AgentExecutionRun:
-    """Run a minimal ReAct tool loop with safe executor-backed tools."""
-    if client is None:
-        raise ValueError("Agent execution loop requires an LLM client")
-    # 执行模式按 ReAct 循环推进：LLM 产出一个 JSON tool call，executor 执行，结果再作为 observation 反馈。
-    plan = classify_task(task, requested_mode=WorkflowMode.AGENT)
-    tool_specs = tools or default_agent_tools()
-    policy = safety_policy or load_agent_safety_policy(config.repo_path, config.agent_policy_path)
-    executor = AgentExecutor(
-        config.repo_path,
-        chunk_size=config.chunk_size,
-        overlap=config.overlap,
-        dry_run=dry_run,
-        safe_mode=safe_mode,
-        safety_policy=policy,
-    )
-    trace = build_agent_execution_trace(task, config, dry_run=dry_run, safe_mode=safe_mode)
-    messages = build_agent_execution_messages(task, plan, tool_specs)
-    tool_calls: list[AgentToolCall] = []
-    observations: list[dict] = []
-    final_text: str | None = None
-
-    allowed_tools = {"read_file", "search_code", "apply_patch", "run_command", "inspect_diff"}
-    for step_index in range(1, max_steps + 1):
-        raw = client.complete(messages).strip()
-        call = parse_agent_tool_call(raw)
-        tool_calls.append(call)
-        # finish 是模型主动结束循环的信号；它不会再调用 executor。
-        if call.tool == "finish":
-            final_text = call.expected_observation or call.thought
-            trace["events"].append(
-                build_trace_event(
-                    step="finish",
-                    status="success",
-                    input={"thought": call.thought},
-                    output_summary={"final": True},
-                    artifacts={"message": final_text},
-                )
-            )
-            break
-        if call.tool not in allowed_tools:
-            # 未声明工具一律失败并写 trace，避免模型幻觉工具名时静默跳过。
-            error = {"type": "UnknownTool", "message": f"unknown tool: {call.tool}", "recoverable": True}
-            observation = {"tool": call.tool, "input": call.arguments, "error": error["message"]}
-            observations.append(observation)
-            trace["events"].append(
-                build_trace_event(
-                    step=call.tool or "unknown_tool",
-                    status="failed",
-                    input=call.arguments,
-                    output_summary={"step": step_index},
-                    artifacts={"thought": call.thought, "expected_observation": call.expected_observation},
-                    error=error,
-                )
-            )
-            break
-        try:
-            # executor 内部会统一做路径、安全策略、dry-run/safe-mode 和输出截断处理。
-            result = executor.call(call.tool, call.arguments)
-            observation = {"tool": call.tool, "input": call.arguments, "output": result}
-            event = build_tool_event(tool=call.tool, input=call.arguments, result=tool_result_payload(call.tool, result))
-            event["artifacts"]["thought"] = call.thought
-            event["artifacts"]["expected_observation"] = call.expected_observation
-        except Exception as error:
-            observation = {"tool": call.tool, "input": call.arguments, "error": str(error)}
-            event = build_trace_event(
-                step=call.tool,
-                status="failed",
-                input=call.arguments,
-                output_summary={"step": step_index},
-                artifacts={"thought": call.thought, "expected_observation": call.expected_observation},
-                error={"type": error.__class__.__name__, "message": str(error), "recoverable": True},
-            )
-        observations.append(observation)
-        trace["events"].append(event)
-        trace["artifacts"]["tools"].append(observation)
-        # observation 追加回对话，让下一轮 LLM 能基于真实工具结果继续决策。
-        messages.append({"role": "assistant", "content": raw})
-        messages.append({"role": "user", "content": "Observation:\n" + json.dumps(observation, ensure_ascii=False)})
-
-    trace["run"]["summary"]["tool_call_count"] = len(tool_calls)
-    trace["run"]["summary"]["observation_count"] = len(observations)
-    trace["summary"] = trace["run"]["summary"]
-    return AgentExecutionRun(
-        task=task,
-        plan=plan,
-        trace=trace,
-        messages=messages,
-        tool_calls=tool_calls,
-        observations=observations,
-        final_text=final_text,
-    )
-
-
-def build_agent_execution_trace(
-    task: str,
-    config: AgentPlanConfig,
-    *,
-    dry_run: bool,
-    safe_mode: bool,
-) -> dict:
-    """构建 Agent 执行追踪记录。"""
-    params = {
-        "repo_path": str(config.repo_path),
-        "top_k": config.top_k,
-        "chunk_size": config.chunk_size,
-        "overlap": config.overlap,
-        "max_context_chars": config.max_context_chars,
-        "dry_run": dry_run,
-        "safe_mode": safe_mode,
-        "agent_policy_path": str(config.agent_policy_path) if config.agent_policy_path else None,
-    }
-    summary = {"tool_call_count": 0, "observation_count": 0}
-    return {
-        "trace_version": "1.0",
-        "run": build_trace_run(
-            mode="agent_exec",
-            task=task,
-            status="dry_run" if dry_run or safe_mode else "success",
-            repo_path=config.repo_path,
-            params=params,
-            flags={"llm": True, "dry_run": dry_run, "safe_mode": safe_mode},
-            summary=summary,
-        ),
-        "events": [],
-        "artifacts": {"retrieval": {}, "agent": {}, "tools": []},
-        "query": task,
-        "summary": summary,
-        "params": params,
-    }
-
-
-def build_agent_execution_messages(task: str, plan: TaskPlan, tools: list[AgentToolSpec]) -> list[dict[str, str]]:
-    """构建 Agent 执行循环的消息列表。"""
-    system_prompt = """你是 RepoPilot 的 ReAct 执行 Agent。
-你每次只能输出一个 JSON 对象，不要输出 markdown。
-JSON 字段固定为 thought, tool, arguments, expected_observation。
-tool 只能是 read_file, search_code, apply_patch, run_command, inspect_diff, finish。
-默认处于 dry-run，apply_patch 不会落盘，run_command 不会真实执行。"""
-    user_prompt = f"""任务: {task}
-
-分类:
-- mode: {plan.mode.value}
-- intent: {plan.intent}
-- reason: {plan.reason}
-
-可用工具:
-{format_tool_specs(tools)}
-
-输出示例:
-{{"thought":"先定位相关代码","tool":"search_code","arguments":{{"query":"{task}","top_k":5}},"expected_observation":"找到候选文件"}}
-"""
-    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
-
-
-def parse_agent_tool_call(raw_text: str) -> AgentToolCall:
-    """将模型原始文本解析为工具调用记录。"""
-    payload = parse_json_object(raw_text)
-    arguments = payload.get("arguments") or {}
-    if not isinstance(arguments, dict):
-        arguments = {}
-    return AgentToolCall(
-        thought=str(payload.get("thought") or ""),
-        tool=str(payload.get("tool") or ""),
-        arguments=arguments,
-        expected_observation=str(payload.get("expected_observation") or ""),
-        raw_text=raw_text,
-    )
-
-
-def parse_json_object(text: str) -> dict:
-    """从文本中提取 JSON 对象字典。"""
-    try:
-        payload = json.loads(text)
-        return payload if isinstance(payload, dict) else {}
-    except json.JSONDecodeError:
-        pass
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
-    if fenced:
-        try:
-            payload = json.loads(fenced.group(1))
-            return payload if isinstance(payload, dict) else {}
-        except json.JSONDecodeError:
-            pass
-    inline = re.search(r"(\{.*\})", text, flags=re.DOTALL)
-    if inline:
-        try:
-            payload = json.loads(inline.group(1))
-            return payload if isinstance(payload, dict) else {}
-        except json.JSONDecodeError:
-            pass
-    return {}
-
-
-def tool_result_payload(tool: str, result) -> dict:
-    """将工具执行结果规范化为可序列化的 payload。"""
-    if isinstance(result, dict):
-        payload = dict(result)
-    else:
-        payload = {"returncode": 0, "result": result}
-    if "returncode" not in payload:
-        payload["returncode"] = 0
-    if tool in {"read_file", "search_code", "inspect_diff"} and "safety" not in payload:
-        payload["safety"] = {"allowed": True, "matched_rule": "readonly"}
-    return payload
-
-
-
-
 def default_agent_tools() -> list[AgentToolSpec]:
     """返回默认的Agent工具规格列表。"""
     return [
@@ -619,13 +351,13 @@ def default_agent_tools() -> list[AgentToolSpec]:
         ),
         AgentToolSpec(
             name="apply_patch",
-            purpose="应用统一 diff 补丁；执行前统一安全检查，dry-run/safe-mode 不会落盘，批量删除文件会被拒绝。",
+            purpose="应用统一 diff 补丁；执行前统一安全检查并逐调用批准，批量删除文件会被拒绝。",
             input_schema={"diff": "str"},
         ),
         AgentToolSpec(
             name="run_command",
             purpose="在仓库根目录执行 allowlist 内的命令，统一安全检查后返回 stdout、stderr、退出码和截断信息。",
-            input_schema={"cmd": "str", "timeout_seconds": "int | None"},
+            input_schema={"cmd": "str", "affected_files": "list[str]", "timeout_seconds": "int | None"},
         ),
         AgentToolSpec(
             name="inspect_diff",

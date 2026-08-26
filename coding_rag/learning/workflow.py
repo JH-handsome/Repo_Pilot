@@ -378,7 +378,6 @@ def build_learning_executor(
             config.repo_path,
             chunk_size=config.chunk_size,
             overlap=config.overlap,
-            dry_run=True,
             safe_mode=True,
             search_provider=search_provider,
         )
@@ -662,8 +661,7 @@ def failure_update(
 def default_learning_safety_flags() -> dict[str, bool]:
     """返回即使执行器初始化失败也成立的 Learning Mode 权限边界。"""
     return {
-        "dry_run": True,
-        "safe_mode": False,
+        "safe_mode": True,
         "readonly": True,
         "execution_requested": False,
         "execution_enabled": False,
@@ -673,7 +671,6 @@ def default_learning_safety_flags() -> dict[str, bool]:
 def learning_executor_flags(executor: AgentExecutor) -> dict[str, bool]:
     """把实际执行器策略转换为可序列化、可审计的只读标志。"""
     flags = default_learning_safety_flags()
-    flags["dry_run"] = bool(executor.safety.policy.dry_run)
     flags["safe_mode"] = bool(executor.safety.policy.safe_mode)
     return flags
 

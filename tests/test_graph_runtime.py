@@ -17,7 +17,10 @@ from coding_rag.agent.graph_runtime import (
     run_graph_query,
 )
 from coding_rag.agent.langchain_tools import (
+    AGENT_LANGCHAIN_TOOL_NAMES,
     READONLY_LANGCHAIN_TOOL_NAMES,
+    build_agent_langchain_tool_map,
+    build_agent_langchain_tools,
     build_readonly_langchain_tool_map,
     build_readonly_langchain_tools,
 )
@@ -243,6 +246,82 @@ class LangChainReadOnlyToolAdapterTest(unittest.TestCase):
         )
 
 
+class LangChainAgentToolAdapterTest(unittest.TestCase):
+    """验证普通 Agent 的完整工具集合和严格委托边界。"""
+
+    def test_builds_all_agent_tools_in_stable_order(self):
+        executor = RecordingExecutor()
+
+        tools = build_agent_langchain_tools(executor)
+
+        self.assertEqual([tool.name for tool in tools], list(AGENT_LANGCHAIN_TOOL_NAMES))
+        self.assertTrue(all(isinstance(tool, StructuredTool) for tool in tools))
+
+    def test_apply_patch_preserves_trailing_newline(self):
+        executor = RecordingExecutor(result={"applied": False})
+        tool = build_agent_langchain_tool_map(executor)["apply_patch"]
+        patch_text = "diff --git a/app.py b/app.py\n"
+
+        result = tool.invoke({"diff": patch_text})
+
+        self.assertEqual(result, {"applied": False})
+        self.assertEqual(executor.calls, [("apply_patch", {"diff": patch_text})])
+
+    def test_run_command_and_inspect_diff_delegate_to_executor(self):
+        executor = RecordingExecutor(result={"ok": True})
+        tool_map = build_agent_langchain_tool_map(executor)
+
+        tool_map["run_command"].invoke(
+            {
+                "cmd": "python -m unittest",
+                "affected_files": ["artifacts/test-output.txt"],
+                "timeout_seconds": 30,
+            }
+        )
+        tool_map["inspect_diff"].invoke({})
+
+        self.assertEqual(
+            executor.calls,
+            [
+                (
+                    "run_command",
+                    {
+                        "cmd": "python -m unittest",
+                        "affected_files": ["artifacts/test-output.txt"],
+                        "timeout_seconds": 30,
+                    },
+                ),
+                ("inspect_diff", {}),
+            ],
+        )
+
+    def test_invalid_write_arguments_do_not_reach_executor(self):
+        invalid_calls = [
+            ("apply_patch", {}),
+            ("apply_patch", {"diff": 1}),
+            ("run_command", {"cmd": "python -m unittest", "timeout_seconds": 0}),
+            ("run_command", {"cmd": "python -m unittest", "timeout_seconds": "30"}),
+            ("run_command", {"cmd": "python -m unittest", "affected_files": []}),
+        ]
+        for name, arguments in invalid_calls:
+            with self.subTest(name=name, arguments=arguments):
+                executor = RecordingExecutor()
+                tool = build_agent_langchain_tool_map(executor)[name]
+
+                with self.assertRaises(ValidationError):
+                    tool.invoke(arguments)
+
+                self.assertEqual(executor.calls, [])
+
+    def test_inspect_diff_never_forwards_model_arguments(self):
+        executor = RecordingExecutor(result={"ok": True})
+        tool = build_agent_langchain_tool_map(executor)["inspect_diff"]
+
+        tool.invoke({"unexpected": True})
+
+        self.assertEqual(executor.calls, [("inspect_diff", {})])
+
+
 class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
     """验证只读图的状态、路由、错误收敛和统一结果结构。"""
 
@@ -286,7 +365,7 @@ class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
         self.assertEqual(model.bind_kwargs, {"parallel_tool_calls": False})
         self.assertEqual(
             set(payload),
-            {"query", "status", "answer", "execution", "summary", "trace"},
+            {"query", "status", "answer", "execution", "approval", "summary", "trace"},
         )
         self.assertEqual(payload["summary"]["tool_call_count"], 0)
         self.assertFalse(payload["execution"]["requested"])

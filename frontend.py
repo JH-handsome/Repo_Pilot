@@ -6,10 +6,19 @@ import argparse
 import json
 import secrets
 import sys
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
+from typing import Any
 from urllib.parse import urlparse
 
-from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query, unified_run_to_dict
+from coding_rag.agent.executor import AgentExecutor
+from coding_rag.agent.runtime import (
+    UnifiedRunConfig,
+    resume_unified_query,
+    run_unified_query,
+    unified_run_to_dict,
+)
 from coding_rag.learning import (
     LearningSessionDependencies,
     LearningWorkflowConfig,
@@ -33,6 +42,39 @@ class UnsupportedMediaType(ValueError):
     """表示 API 请求没有使用 application/json。"""
 
 
+@dataclass
+class PendingApproval:
+    """Server-only state required to resume one exact write call."""
+
+    run: Any
+    config: UnifiedRunConfig
+    client: Any
+
+
+class PendingApprovalStore:
+    """Thread-safe, one-use browser approval state store."""
+
+    def __init__(self) -> None:
+        """Initialize an empty process-local store."""
+        self._items: dict[str, PendingApproval] = {}
+        self._lock = Lock()
+
+    def put(self, pending: PendingApproval) -> str:
+        """Store one pending run and return an opaque browser handle."""
+        approval_id = secrets.token_urlsafe(24)
+        with self._lock:
+            self._items[approval_id] = pending
+        return approval_id
+
+    def pop(self, approval_id: str) -> PendingApproval:
+        """Consume one pending run exactly once."""
+        with self._lock:
+            pending = self._items.pop(approval_id, None)
+        if pending is None:
+            raise ValueError("approval request is missing, expired, or already used")
+        return pending
+
+
 def parse_args() -> argparse.Namespace:
     """解析命令行参数并返回 argparse.Namespace。"""
     configure_utf8_stdio()
@@ -53,6 +95,11 @@ class RepoPilotServer(ThreadingHTTPServer):
     # 每个 Python 服务进程只生成一次，既不注入 HTML，也不进入任何响应或日志。
     learning_signing_key: bytes = secrets.token_bytes(32)
 
+    def __init__(self, *args, **kwargs):
+        """Initialize HTTP service state, including one-time approvals."""
+        super().__init__(*args, **kwargs)
+        self.pending_approvals = PendingApprovalStore()
+
 
 class RepoPilotHandler(BaseHTTPRequestHandler):
     """RepoPilot HTTP 请求处理器。"""
@@ -66,7 +113,7 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         """分发普通查询与只读教学会话请求。"""
         path = urlparse(self.path).path
-        if path not in {"/api/run", "/api/learning/session"}:
+        if path not in {"/api/run", "/api/rollback", "/api/learning/session"}:
             self.send_error(404)
             return
         try:
@@ -76,10 +123,16 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
                     payload,
                     signing_key=self.server_learning_signing_key(),
                 )
+            elif path == "/api/rollback":
+                response = run_frontend_rollback(
+                    payload,
+                    server_allows_execution=self.server_allows_execution(),
+                )
             else:
                 response = run_frontend_query(
                     payload,
                     server_allows_execution=self.server_allows_execution(),
+                    approval_store=self.server.pending_approvals,
                 )
         except RequestBodyTooLarge as error:
             self.send_json({"ok": False, "error": str(error)}, status=413)
@@ -172,16 +225,41 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
         return
 
 
-def run_frontend_query(payload: dict, *, server_allows_execution: bool = False) -> dict:
-    """校验前端请求、执行统一查询，仅当服务器已授权时才允许请求启用工具执行。"""
+def run_frontend_query(
+    payload: dict,
+    *,
+    server_allows_execution: bool = False,
+    approval_store: PendingApprovalStore | None = None,
+) -> dict:
+    """Start or approve one browser run without accepting blanket execution permission."""
+    if "execute_tools" in payload:
+        raise ValueError("execute_tools is no longer supported; approve each write call instead")
+    approval_id = str(payload.get("approval_id") or "").strip()
+    if approval_id:
+        if not server_allows_execution:
+            raise PermissionError("服务启动时未授权写工具，请使用 --allow-tool-execution")
+        if approval_store is None:
+            raise ValueError("browser approval store is unavailable")
+        pending = approval_store.pop(approval_id)
+        fingerprint = pending.run.approval["fingerprint"]
+        run = resume_unified_query(
+            pending.run,
+            pending.config,
+            pending.client,
+            approval_fingerprint=fingerprint,
+        )
+        return prepare_frontend_run_response(
+            run,
+            config=pending.config,
+            client=pending.client,
+            server_allows_execution=server_allows_execution,
+            approval_store=approval_store,
+        )
+
     repo_path = str(payload.get("repo_path") or ".").strip()
     query = str(payload.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
-
-    execute_tools = bool(payload.get("execute_tools"))
-    if execute_tools and not server_allows_execution:
-        raise PermissionError("服务启动时未授权工具执行，请使用 --allow-tool-execution")
 
     load_dotenv()
     llm_config = build_llm_config(
@@ -194,22 +272,50 @@ def run_frontend_query(payload: dict, *, server_allows_execution: bool = False) 
         temperature=None,
     )
     client = OpenAICompatibleChatClient(llm_config)
-    run = run_unified_query(
-        query,
-        UnifiedRunConfig(
-            repo_path=repo_path,
-            top_k=int(payload.get("top_k") or 5),
-            recall_window=int(payload.get("recall_window") or 2),
-            generation_mode=GenerationMode(str(payload.get("mode") or "judge")),
-            max_context_chars=int(payload.get("max_context_chars") or 12000),
-            agent_policy_path=empty_to_none(payload.get("agent_policy")),
-        ),
-        client,
-        execute_tools=execute_tools,
+    config = UnifiedRunConfig(
+        repo_path=repo_path,
+        top_k=int(payload.get("top_k") or 5),
+        recall_window=int(payload.get("recall_window") or 2),
+        generation_mode=GenerationMode(str(payload.get("mode") or "judge")),
+        max_context_chars=int(payload.get("max_context_chars") or 12000),
+        agent_policy_path=empty_to_none(payload.get("agent_policy")),
     )
+    run = run_unified_query(query, config, client)
+    return prepare_frontend_run_response(
+        run,
+        config=config,
+        client=client,
+        server_allows_execution=server_allows_execution,
+        approval_store=approval_store,
+    )
+
+
+def prepare_frontend_run_response(
+    run,
+    *,
+    config: UnifiedRunConfig,
+    client: Any,
+    server_allows_execution: bool,
+    approval_store: PendingApprovalStore | None,
+) -> dict:
+    """Serialize a run and retain resumable state only on the server."""
     response = unified_run_to_dict(run)
     response["execution"]["server_allowed"] = server_allows_execution
+    response["approval_id"] = None
+    if run.status == "approval_required" and server_allows_execution and approval_store is not None:
+        response["approval_id"] = approval_store.put(PendingApproval(run, config, client))
     return response
+
+
+def run_frontend_rollback(payload: dict, *, server_allows_execution: bool) -> dict:
+    """Restore one snapshot only when the server write capability is enabled."""
+    if not server_allows_execution:
+        raise PermissionError("服务启动时未授权恢复写操作")
+    repo_path = str(payload.get("repo_path") or "").strip()
+    snapshot_id = str(payload.get("snapshot_id") or "").strip()
+    if not repo_path or not snapshot_id:
+        raise ValueError("repo_path and snapshot_id are required")
+    return AgentExecutor(repo_path).rollback_snapshot(snapshot_id)
 
 
 def run_learning_frontend_request(payload: dict, *, signing_key: bytes) -> dict:
@@ -297,7 +403,7 @@ def main() -> None:
     args = parse_args()
     server = RepoPilotServer((args.host, args.port), RepoPilotHandler)
     server.allow_tool_execution = args.allow_tool_execution
-    execution_label = "enabled" if args.allow_tool_execution else "dry-run only"
+    execution_label = "per-call approval enabled" if args.allow_tool_execution else "approval disabled"
     print(f"RepoPilot frontend: http://{args.host}:{args.port} (tool execution: {execution_label})")
     try:
         server.serve_forever()
@@ -494,9 +600,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
           </select>
         </div>
       </div>
-      <label class="toggle" id="executeLabel" title="需要服务启动时同时传入 --allow-tool-execution">
-        <input id="executeTools" type="checkbox" /> 允许执行工具
-      </label>
+      <div class="mode-note" id="writePolicyNote">写工具会逐调用列出文件并等待一次性批准。</div>
       <button id="run">运行</button>
     </section>
     <section class="output" id="output">
@@ -515,17 +619,13 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     const learningReflectControls = document.getElementById("learningReflectControls");
     const answerModeField = document.getElementById("answerModeField");
     const topKInput = document.getElementById("topK");
-    const executeTools = document.getElementById("executeTools");
-    const executeLabel = document.getElementById("executeLabel");
     let requestInFlight = false;
     let learningSession = null;
     let learningNextAction = "start";
     let learningLastResult = null;
 
     if (!serverAllowsExecution) {
-      executeTools.disabled = true;
-      executeLabel.classList.add("disabled");
-      executeLabel.title = "服务未使用 --allow-tool-execution 启动";
+      document.getElementById("writePolicyNote").textContent = "服务未启用写能力；写请求只会展示，不可批准执行。";
     }
     appMode.addEventListener("change", updateMode);
     runBtn.addEventListener("click", runTask);
@@ -556,7 +656,6 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         recall_window: Number(value("recall")),
         provider: value("provider"),
         mode: value("mode"),
-        execute_tools: executeTools.checked,
       };
       try {
         const response = await fetch("/api/run", {
@@ -568,7 +667,9 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         if (!response.ok || !data.ok) throw new Error(data.error || `请求失败 (${response.status})`);
         if (appMode.value === "ask") {
           renderRun(data);
-          statusEl.textContent = data.status === "failed" ? "失败" : "完成";
+          statusEl.textContent = data.status === "approval_required"
+            ? "等待批准"
+            : (data.status === "failed" ? "失败" : "完成");
         }
       } catch (error) {
         if (appMode.value === "ask") {
@@ -582,6 +683,55 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         else syncLearningControls();
       }
     }
+
+    async function approveWrite(approvalId) {
+      if (requestInFlight || !approvalId) return;
+      requestInFlight = true;
+      runBtn.disabled = true;
+      statusEl.textContent = "正在执行已批准的这一次写操作...";
+      try {
+        const response = await fetch("/api/run", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({approval_id: approvalId}),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+        renderRun(data);
+        statusEl.textContent = data.status === "approval_required" ? "等待下一次批准" : "完成";
+      } catch (error) {
+        outputEl.innerHTML = `<div class="block"><h2>执行失败</h2><pre>${escapeHtml(error.message)}</pre></div>`;
+        statusEl.textContent = "失败";
+      } finally {
+        requestInFlight = false;
+        runBtn.disabled = false;
+      }
+    }
+
+    async function rollbackWrite(snapshotId) {
+      if (requestInFlight || !snapshotId) return;
+      requestInFlight = true;
+      statusEl.textContent = "正在恢复修改前快照...";
+      try {
+        const response = await fetch("/api/rollback", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({repo_path: value("repo"), snapshot_id: snapshotId}),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || `恢复失败 (${response.status})`);
+        statusEl.textContent = "已恢复";
+        outputEl.insertAdjacentHTML("afterbegin", `<div class="block"><h2>已恢复快照</h2><pre>${escapeHtml(snapshotId)}</pre></div>`);
+      } catch (error) {
+        statusEl.textContent = "恢复失败";
+        outputEl.insertAdjacentHTML("afterbegin", `<div class="block failed"><h2>恢复失败</h2><pre>${escapeHtml(error.message)}</pre></div>`);
+      } finally {
+        requestInFlight = false;
+      }
+    }
+
+    window.approveWrite = approveWrite;
+    window.rollbackWrite = rollbackWrite;
 
     async function runLearningTask() {
       if (requestInFlight || learningNextAction === "none") return;
@@ -679,7 +829,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
       askControls.classList.toggle("hidden", isLearning);
       learningControls.classList.toggle("hidden", !isLearning);
       answerModeField.classList.toggle("hidden", isLearning);
-      executeLabel.classList.toggle("hidden", isLearning);
+      document.getElementById("writePolicyNote").classList.toggle("hidden", isLearning);
       topKInput.max = isLearning ? "20" : "50";
       if (isLearning && Number(topKInput.value) > 20) topKInput.value = "20";
       if (isLearning) {
@@ -720,12 +870,49 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     function renderRun(data) {
       const summary = data.summary || {};
       const execution = data.execution || {};
+      const approval = data.approval || null;
+      const approvalButton = approval && data.approval_id ? `
+        <button onclick="approveWrite('${escapeHtml(data.approval_id)}')">批准并执行这一次写操作</button>
+      ` : (approval ? '<div class="meta">服务未启用写能力，无法批准执行。</div>' : '');
+      const approvalArguments = approval && approval.arguments ? approval.arguments : {};
+      const approvalDetail = approval && approval.tool === "run_command"
+        ? `<h3>命令</h3><pre>${escapeHtml(approvalArguments.cmd || "")}</pre>`
+        : (approval && approval.tool === "apply_patch"
+          ? `<h3>待应用补丁</h3><pre>${escapeHtml(approvalArguments.diff || "")}</pre>`
+          : "");
+      const approvalBlock = approval ? `
+        <div class="block">
+          <h2>等待写操作批准</h2>
+          <div class="meta">tool=${escapeHtml(approval.tool || "unknown")}</div>
+          <h3>将修改的文件</h3>
+          ${renderList(approval.files || [])}
+          ${approvalDetail}
+          <div class="meta">一次性指纹=${escapeHtml(approval.fingerprint || "missing")}</div>
+          ${approvalButton}
+        </div>
+      ` : "";
+      const traceEvents = data.trace && Array.isArray(data.trace.events) ? data.trace.events : [];
+      const writeResults = traceEvents.map(event => {
+        const artifacts = event && event.artifacts ? event.artifacts : {};
+        return artifacts.patch || artifacts.command || null;
+      }).filter(result => result && result.snapshot_id);
+      const changesBlock = writeResults.map(output => `
+        <div class="block">
+          <h2>已执行修改</h2>
+          <div class="meta">snapshot=${escapeHtml(output.snapshot_id)}</div>
+          <h3>修改后 diff</h3>
+          <pre>${escapeHtml((output.post_change_diff && output.post_change_diff.text) || "（声明文件未检测到文本变化）")}</pre>
+          <button onclick="rollbackWrite('${escapeHtml(output.snapshot_id)}')">恢复到修改前</button>
+        </div>
+      `).join("");
       outputEl.innerHTML = `
         <div class="block">
           <h2>回答</h2>
-          <div class="meta">status=${escapeHtml(data.status)} execution=${execution.enabled ? "enabled" : "dry-run"}</div>
+          <div class="meta">status=${escapeHtml(data.status)} write_executed=${execution.enabled ? "yes" : "no"}</div>
           <pre>${escapeHtml(data.answer)}</pre>
         </div>
+        ${approvalBlock}
+        ${changesBlock}
         <div class="block">
           <h2>运行统计</h2>
           <div class="meta">LLM=${escapeHtml(summary.llm_call_count || 0)} tools=${escapeHtml(summary.tool_call_count || 0)} observations=${escapeHtml(summary.observation_count || 0)}</div>
