@@ -1,6 +1,32 @@
-# RepoPilot：轻量级代码 RAG 检索工具
+# RepoPilot：基于 LangGraph 的本地代码助手
 
-RepoPilot 是一个用于学习和实验的代码检索项目。它会读取 Python 仓库，由 LLM 自动决定直接回答或调用 Hybrid Search、文件读取、补丁和验证命令等工具。
+RepoPilot 帮助你在本地 Python 仓库中定位代码、理解实现，并在逐次确认后执行修改。
+你可以直接描述问题，模型通过 LangGraph 调用代码搜索、文件读取等工具，依据源码给出回答；
+需要应用补丁或执行命令时，先展示操作内容，等待你批准。
+
+项目同时提供多轮代码问答、项目复现教学和检索评测，适合阅读陌生仓库，
+也适合学习代码 RAG、工具调用和 Agent 工作流的实现。
+
+## 能做什么
+
+| 能力 | 当前实现 |
+| --- | --- |
+| 代码定位与解释 | 融合正文 BM25、路径与符号信息及结构评分，召回邻近代码，并提供文件与行号引用。 |
+| 多轮对话 | 按仓库和会话 ID 隔离历史，使用本地 SQLite 保存完成轮次；浏览器刷新可继续，CLI 和桌面入口可通过原会话 ID 恢复。 |
+| 确认后修改 | 每次补丁或命令分别申请批准；执行后展示 diff，支持对声明文件创建快照并回滚。 |
+| 项目复现教学 | 根据源码生成分步学习路线，审查你提交的实现说明和测试结果，再通过反思推进；教学模式始终只读。 |
+| 运行记录与评测 | 查看模型决策、工具结果和检索阶段；普通 CLI／浏览器运行支持 SQLite trace 存储，另提供离线检索与规划评测脚本。 |
+
+## 选择使用方式
+
+- **浏览器**：运行 `python frontend.py`，访问 [本地页面](http://127.0.0.1:8765)，使用代码问答或项目学习。
+- **命令行**：运行 `python main.py <仓库路径>`，连续输入问题或需求；也可以直接传入一个问题。
+- **桌面界面**：运行 `python web_ui.py`，选择仓库、调整检索参数、查询代码或运行评测。
+
+开始前需安装依赖，并配置兼容 OpenAI Chat Completions 的模型服务，具体见下文。
+代码索引目前面向 Python 源文件；检索本身不要求部署向量数据库。
+本地保存的是聊天记录和运行数据，模型调用仍会把所需问题及代码上下文发送到你配置的服务。
+普通聊天与项目学习采用不同的会话机制：聊天支持持久化恢复，教学页面刷新后重新开始。
 
 ## 项目结构
 
@@ -8,14 +34,16 @@ RepoPilot 是一个用于学习和实验的代码检索项目。它会读取 Pyt
 .
 ├── coding_rag/
 │   ├── agent/               # Agent 计划、执行器、安全策略、记忆和审查
-│   ├── rag/                 # ASK、LLM 客户端、prompt、回答生成、引用校验和 trace
+│   ├── learning/            # 只读项目教学、分步路线与学习会话
+│   ├── rag/                 # 检索流水线、LLM 客户端、提示、引用校验和 trace
 │   ├── repository/          # 文件加载、代码切片和仓库结构索引
+│   ├── storage/             # SQLite trace 存储、过滤和失败补录
 │   └── tools/               # Hybrid Search、分词、召回、过滤和只读工具
 ├── scripts/                 # 离线脚本：检索评测、LeetCode 兼容补丁、数据下载
 ├── datasets/
 │   ├── eval/                # 评测集，支持 JSON 数组和 JSONL trace 两种格式
 │   └── leetcode_reference/  # LeetCode 本地类型参考
-├── artifacts/               # 运行后生成的 trace、评测结果等临时产物
+├── artifacts/               # 本地聊天历史、运行 trace 与评测结果
 ├── tests/                   # 单元测试
 ├── main.py                  # 命令行入口
 ├── frontend.py              # 浏览器前端
@@ -28,7 +56,7 @@ RepoPilot 是一个用于学习和实验的代码检索项目。它会读取 Pyt
 ## 安装
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 ## 统一入口
@@ -60,7 +88,7 @@ python frontend.py --allow-tool-execution
 }
 ```
 
-响应包含 `status`、`answer`、`execution`、`approval`、`approval_id`、`summary` 和统一 `trace`。`approval_id` 只在服务允许写入且当前状态为 `approval_required` 时返回；把它单独提交到 `/api/run` 只会批准对应调用一次。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
+响应包含 `status`、`answer`、`execution`、`approval`、`approval_id`、`summary`、`conversation` 和统一 `trace`。普通多轮聊天需复用 `conversation.session_id`，详见文末的历史与恢复说明。`approval_id` 只在服务允许写入且当前状态为 `approval_required` 时返回；把它单独提交到 `/api/run` 只会批准对应调用一次。旧 `/api/ask`、`/api/agent-plan` 端点不再提供。
 
 ### Learning Mode 浏览器教学
 
@@ -121,7 +149,7 @@ python main.py . "修复统一入口的 trace 状态"
 3. `coding_rag.tools.bm25.BM25Retriever` 建立正文 BM25、路径/符号 BM25 和 token 覆盖度信号，并融合检索种子代码块。
 4. `coding_rag.tools.recall` 召回同文件相邻代码块，补足上下文。
 5. `coding_rag.tools.filter` 重新评分并保留最终上下文。
-6. `coding_rag.rag.prompt` 在发送给 LLM 前合并同文件连续/重叠代码块，减少重复上下文。
+6. 普通 Agent 将工具结果整理成 observation，并在保留完整路径的前提下限制发送给模型的内容长度。离线 ASK 提示另支持合并同文件连续／重叠代码块。
 7. LLM 根据已有观察决定继续调用工具或生成最终回答。
 
 常用参数：
