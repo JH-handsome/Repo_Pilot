@@ -12,3 +12,6 @@ artifacts/*.jsonl
 artifacts/*.json
 data/indexes/
 data/repos/
+.engramory-memory/
+artifacts/*.sqlite3*
+artifacts/trace_pending/

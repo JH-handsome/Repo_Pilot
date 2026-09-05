@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from coding_rag.agent.safety import AgentSafetyGuard, AgentSafetyPolicy, SafetyDecision
-from coding_rag.agent.snapshots import SnapshotStore, normalize_snapshot_paths
+from coding_rag.agent.snapshots import SnapshotStore, normalize_snapshot_paths, resolve_repo_file
 from coding_rag.tools.agent_readonly import AgentToolError, ReadOnlyAgentTools
 
 
@@ -124,13 +124,18 @@ class AgentExecutor:
             ensure_allowed(decision)
             files = normalize_snapshot_paths(decision.metadata.get("changed_files") or [])
         elif name == "run_command":
-            decision = self.safety.check_command(str(arguments.get("cmd") or ""))
+            decision = self.safety.check_command(
+                str(arguments.get("cmd") or ""),
+                repo_path=self.repo_path,
+            )
             ensure_allowed(decision)
             files = normalize_snapshot_paths(arguments.get("affected_files") or [])
             if not files:
                 raise AgentToolError("run_command must declare affected_files before approval")
         else:
             raise AgentToolError(f"tool does not require write approval: {name}")
+        for relative_path in files:
+            resolve_repo_file(self.repo_path, relative_path)
         canonical = canonical_write_arguments(name, arguments, files)
         return {
             "tool": name,
@@ -179,7 +184,7 @@ class AgentExecutor:
     ) -> dict[str, Any]:
         """Check, approve, snapshot and execute one allowlisted command."""
         # 命令执行必须经过 allowlist/denylist；通过后也用 shell=False 避免 shell 拼接副作用。
-        decision = self.safety.check_command(cmd)
+        decision = self.safety.check_command(cmd, repo_path=self.repo_path)
         ensure_allowed(decision)
         timeout = self.safety.resolve_timeout(timeout_seconds)
         arguments: dict[str, Any] = {

@@ -461,10 +461,12 @@ class LearningFrontendHttpTest(unittest.TestCase):
             *,
             server_allows_execution: bool,
             approval_store,
+            trace_db_path,
         ) -> dict[str, Any]:
             captured["payload"] = payload
             captured["server_allows_execution"] = server_allows_execution
             captured["approval_store"] = approval_store
+            captured["trace_db_path"] = trace_db_path
             return {
                 "status": "success",
                 "answer": "mock answer",
@@ -484,6 +486,7 @@ class LearningFrontendHttpTest(unittest.TestCase):
         self.assertEqual(captured["payload"], payload)
         self.assertTrue(captured["server_allows_execution"])
         self.assertIs(captured["approval_store"], server.pending_approvals)
+        self.assertEqual(captured["trace_db_path"], server.trace_db_path)
 
     def test_same_server_runs_real_start_submit_reflect_sequence(self):
         plan = LearningPlan.model_validate(valid_plan_payload())
@@ -708,7 +711,8 @@ class LearningFrontendHtmlTest(unittest.TestCase):
         self.assertIn('/api/learning/session', INDEX_HTML)
         self.assertIn("let learningSession = null", INDEX_HTML)
         self.assertNotIn("localStorage", INDEX_HTML)
-        self.assertNotIn("sessionStorage", INDEX_HTML)
+        self.assertNotIn("sessionStorage", learning_script_slice(INDEX_HTML))
+        self.assertIn("repopilot.chat.sessions.v1", INDEX_HTML)
 
     def test_html_has_busy_lock_and_escaped_learning_rendering(self):
         self.assertIn("let requestInFlight = false", INDEX_HTML)

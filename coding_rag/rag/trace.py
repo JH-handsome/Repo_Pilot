@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from datetime import datetime, timezone
 
 from coding_rag.rag.prompt import ContextBlock, compact_results_for_context
 from coding_rag.tools.bm25 import SearchResult
@@ -112,6 +113,7 @@ def build_trace_event(
         "artifacts": artifacts or {},
         "error": error,
         "duration_ms": duration_ms,
+        "occurred_at": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
     }
 
 

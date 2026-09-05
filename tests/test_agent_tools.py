@@ -152,6 +152,49 @@ class AgentToolsTest(unittest.TestCase):
             with self.assertRaises(AgentToolError):
                 executor.run_command("python -m compileall app.py && git status")
 
+    def test_executor_rejects_parent_path_in_command_before_approval(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            executor = AgentExecutor(root)
+
+            with self.assertRaisesRegex(AgentToolError, "repository-relative"):
+                executor.preview_write(
+                    "run_command",
+                    {
+                        "cmd": "rg load_data ../outside.py",
+                        "affected_files": ["app.py"],
+                    },
+                )
+
+    def test_executor_rejects_absolute_path_in_command_before_approval(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            outside = root.parent / "outside.py"
+            executor = AgentExecutor(root)
+
+            with self.assertRaisesRegex(AgentToolError, "repository-relative"):
+                executor.preview_write(
+                    "run_command",
+                    {
+                        "cmd": f"rg load_data {outside.as_posix()}",
+                        "affected_files": ["app.py"],
+                    },
+                )
+
+    def test_executor_rejects_outside_path_in_command_option(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            executor = AgentExecutor(root)
+
+            with self.assertRaisesRegex(AgentToolError, "repository-relative"):
+                executor.preview_write(
+                    "run_command",
+                    {
+                        "cmd": "python scripts/retrieval_eval.py --trace-out=../outside.json",
+                        "affected_files": ["app.py"],
+                    },
+                )
+
     def test_executor_requires_exact_approval_before_command(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)

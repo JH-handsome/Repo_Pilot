@@ -171,11 +171,13 @@ def build_graph_input(query: str, config: UnifiedRunConfig) -> GraphState:
 def build_unified_graph_input(
     query: str,
     config: UnifiedRunConfig,
+    history: list[dict[str, str]] | None = None,
+    omitted_turns: int = 0,
 ) -> UnifiedGraphState:
     """为普通 Agent 构造字段完整、可序列化的初始图状态。"""
     return {
         "query": query,
-        "messages": build_unified_messages(query, config),
+        "messages": build_unified_messages(query, config, history, omitted_turns),
         "answer": "",
         "status": "running",
         "route": "model",
@@ -659,6 +661,7 @@ def build_unified_graph(
         answer = append_citation_validation_report(answer, validation)
         status = resolve_success_status(state["had_tool_failure"])
         return {
+            "messages": [{"role": "assistant", "content": decision.raw_text}],
             "answer": answer,
             "status": status,
             "route": "done",
@@ -836,6 +839,8 @@ def run_unified_graph_query(
     safety_policy: AgentSafetyPolicy | None = None,
     resume_state: dict[str, Any] | None = None,
     write_approval: str | None = None,
+    history: list[dict[str, str]] | None = None,
+    omitted_turns: int = 0,
 ) -> UnifiedRun:
     """运行普通 Agent 的有界 LangGraph，并返回现有 UnifiedRun 结构。"""
     query = query.strip()
@@ -871,7 +876,7 @@ def run_unified_graph_query(
     graph_input = (
         json_safe(resume_state)
         if resume_state is not None
-        else build_unified_graph_input(query, config)
+        else build_unified_graph_input(query, config, history, omitted_turns)
     )
     if resume_state is not None:
         graph_input.update(

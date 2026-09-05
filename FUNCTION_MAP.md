@@ -11,7 +11,7 @@ CLI 统一入口，所有问题和修改需求都交给 LLM 决定直接回答�
 - `parse_args()`: 定义检索、回答风格、LLM、policy、trace 和 `--rollback` 参数；不再包含 ASK/Agent 模式参数或总执行授权。
 - `main()`: 加载已有 `.env`，决定进入交互模式还是单次统一运行。
 - `run_single_turn(args, client)`: 构建统一配置并调用 `run_unified_query()`。
-- `run_interactive_cli(args)`: 复用一个 LLM client 连续执行统一工作流。
+- `run_interactive_cli(args)`: 复用一个 LLM client 与稳定会话 UUID 连续执行统一工作流。
 - `build_chat_client(args)`: 根据 provider 和环境变量创建 OpenAI 兼容 client。
 - `build_runtime_config(args)`: 将 CLI 参数转换为 `UnifiedRunConfig`。
 - `render_unified_run(run)`: 渲染状态、执行授权、调用统计和最终回答。
@@ -74,7 +74,7 @@ Tkinter 桌面 UI，覆盖检索、LLM 回答、评测、bad case 查看和参�
 
 ### `coding_rag/agent/runtime.py`
 
-CLI 和浏览器共用的统一结果模型、JSON 决策协议与辅助函数；公开入口委托给 LangGraph。
+CLI、浏览器和 Tk LLM 查询共用的统一结果模型、JSON 决策协议与辅助函数；公开入口委托给 LangGraph。
 
 - `UnifiedRunConfig`: 统一运行配置，包括 Hybrid Search、回答风格、上下文限制、policy 和最大工具步数。
 - `ModelDecision`: 模型结构化决策，字段为 `action/reason/answer/tool/arguments/expected_observation`。
@@ -198,7 +198,7 @@ Agent 工具执行器，封装可执行工具表面。
 - `AgentExecutor.call(name, arguments)`: 工具分发入口。
 - `AgentExecutor.read_file(path, start_line, end_line)`: 读取仓库内文件。
 - `AgentExecutor.search_code(query, top_k)`: 优先调用注入的 Hybrid Search provider，否则复用基础只读检索。
-- `AgentExecutor.preview_write(name, arguments)`: 校验写调用，列出目标文件并生成绑定完整参数的批准指纹。
+- `AgentExecutor.preview_write(name, arguments)`: 校验写调用及仓库内路径边界，列出目标文件并生成绑定完整参数的批准指纹。
 - `AgentExecutor.apply_patch(diff)`: 安全检查和 `git apply --check` 后消费批准、创建快照、应用补丁并返回修改后 diff。
 - `AgentExecutor.run_command(cmd, affected_files, timeout_seconds)`: 校验命令和声明文件，消费批准、创建快照后以 `shell=False` 执行。
 - `AgentExecutor.rollback_snapshot(snapshot_id)`: 恢复声明文件的修改前版本。
@@ -670,3 +670,38 @@ LeetCode 本地运行用数据结构和转换函数。
 - `linked_list_to_list(head)`: 链表转列表。
 - `build_binary_tree(values)`: 层序列表构造二叉树。
 - `binary_tree_to_list(root)`: 二叉树转层序列表。
+
+
+## Trace 数据库存储补充
+
+### `coding_rag/storage/sqlite.py`
+
+- `TraceStore`: 保存、读取与分页查询的存储接口约定。
+- `SQLiteTraceStore`: SQLite 事务、结构版本保护、WAL、累计事件去重和运行查询。
+- `TraceSchemaError`: 数据库结构不兼容错误。
+- `utc_now()`: UTC 时间戳。
+
+### `coding_rag/storage/persistence.py`
+
+- `configured_trace_db()`: 解析命令行/环境变量数据库位置与关闭选项。
+- `sanitize_trace()`: 构造过滤后的诊断副本，不修改运行中的授权与响应。
+- `persist_trace()`: 保存或写待补录副本，仅返回存储状态。
+- `replay_pending()`: 幂等补录单个文件，不执行模型或工具。
+
+### 接入位置
+
+- `coding_rag/agent/runtime.py::persist_unified_run()`: 普通 Agent 返回后统一保存运行标识、版本与时间。
+- `frontend.py::RepoPilotHandler.get_trace_history()`: 先校验独立读取令牌，再查询服务端数据库。
+- `scripts/replay_trace_pending.py::main()`: 指定文件的手动补录入口。
+
+
+### `coding_rag/agent/conversation.py`
+
+普通聊天的完成轮次存储，与 trace、教学 session 和 Engramory 分离。
+
+- `conversation_path(explicit)`: 解析聊天数据库路径和 `REPOPILOT_CHAT_DB`。
+- `session_key(repo_path, session_id)`: 规范化仓库路径并校验会话 UUID。
+- `ConversationStore`: 用短连接读取完整轮次，以事务、运行 ID 和修订检查追加；锁池串行处理同服务内的同会话请求。
+- `history_messages(turns, max_chars)`: 保留首轮及最近完整消息对，并报告省略数量。
+- `run_unified_query`: 装载历史后进入 Graph，完成时保存本轮；无 session_id 时保持单次调用语义。
+- `resume_unified_query`: 批准执行前校验聊天修订，完成后仅保存一次；不恢复历史工具状态。

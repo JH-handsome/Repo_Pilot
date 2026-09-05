@@ -87,8 +87,13 @@ class AgentSafetyGuard:
         """使用提供的策略或默认策略初始化安全守卫。"""
         self.policy = policy or AgentSafetyPolicy()
 
-    def check_command(self, cmd: str) -> SafetyDecision:
-        """解析命令并应用 safe-mode、拒绝与允许规则。"""
+    def check_command(
+        self,
+        cmd: str,
+        *,
+        repo_path: str | Path | None = None,
+    ) -> SafetyDecision:
+        """解析命令，并限制显式路径参数只能指向仓库内部。"""
         # 检查顺序很重要：先拒绝 shell 组合语法，再看 denylist，最后才看 allowlist。
         args = parse_command(cmd)
         normalized = normalize_args(args)
@@ -107,6 +112,15 @@ class AgentSafetyGuard:
         allowed = matching_prefix(normalized, self.policy.allowlist)
         if not allowed:
             return SafetyDecision(False, "command is not in the allowlist", None)
+
+        escaped_path = find_outside_repo_command_path(args, repo_path)
+        if escaped_path is not None:
+            return SafetyDecision(
+                False,
+                f"command paths must be repository-relative and stay inside the repository: {escaped_path}",
+                "outside-repository",
+                metadata={"args": args, "path": escaped_path},
+            )
 
         return SafetyDecision(
             True,
@@ -209,6 +223,53 @@ def matching_prefix(
 def command_rule_name(prefix: tuple[str, ...]) -> str:
     """将命令-规则令牌元组合并为其显示名称。"""
     return " ".join(prefix)
+
+
+def find_outside_repo_command_path(
+    args: list[str],
+    repo_path: str | Path | None,
+) -> str | None:
+    """Return the first explicit command path that can escape the repository."""
+    if repo_path is None:
+        return None
+    root = Path(repo_path).resolve()
+    for raw_arg in args[1:]:
+        candidate = command_path_candidate(raw_arg, root)
+        if candidate is None:
+            continue
+        normalized = candidate.replace("\\", "/")
+        parts = PurePosixPath(normalized).parts
+        if (
+            normalized.startswith(("/", "//", "~"))
+            or WINDOWS_ABSOLUTE_PATTERN.match(normalized)
+            or ".." in parts
+        ):
+            return raw_arg
+        try:
+            resolved = (root / Path(*parts)).resolve()
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return raw_arg
+    return None
+
+
+def command_path_candidate(raw_arg: str, repo_path: Path) -> str | None:
+    """Extract path-like command operands, including ``--option=value`` forms."""
+    value = raw_arg.strip().strip("\"'")
+    if value.startswith("-"):
+        _, separator, value = value.partition("=")
+        if not separator:
+            return None
+    if not value:
+        return None
+    normalized = value.replace("\\", "/")
+    looks_like_path = (
+        normalized.startswith((".", "/", "~"))
+        or WINDOWS_ABSOLUTE_PATTERN.match(normalized) is not None
+        or "/" in normalized
+        or (repo_path / value).exists()
+    )
+    return value if looks_like_path else None
 
 
 def inspect_patch_paths(diff: str) -> tuple[list[str], list[str]]:

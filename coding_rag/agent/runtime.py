@@ -5,10 +5,16 @@ from __future__ import annotations
 import copy
 import json
 import re
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
+from uuid import uuid4
+
+from coding_rag.agent.conversation import ConversationStore, history_messages
+from coding_rag.storage.persistence import persist_trace
+from coding_rag.storage.sqlite import utc_now
 
 from coding_rag.agent.executor import AgentExecutor, decision_to_dict
 from coding_rag.agent.safety import AgentSafetyPolicy, load_agent_safety_policy
@@ -53,6 +59,11 @@ class UnifiedRunConfig:
     agent_policy_path: str | Path | None = None
     snapshot_root: str | Path | None = None
     max_steps: int = 6
+    trace_db_path: str | Path | None = None
+    trace_source: str = "python"
+    session_id: str | None = None
+    conversation_db_path: str | Path | None = None
+    max_history_chars: int = 24000
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,7 @@ class UnifiedRun:
     execution_enabled: bool
     approval: dict[str, Any] | None = None
     resume_state: dict[str, Any] | None = None
+    storage: dict[str, Any] = field(default_factory=lambda: {"status": "disabled"})
 
 
 def run_unified_query(
@@ -95,12 +107,26 @@ def run_unified_query(
     """通过 LangGraph 运行普通 Agent 的统一公开入口。"""
     from coding_rag.agent.graph_runtime import run_unified_graph_query
 
-    return run_unified_graph_query(
-        query,
-        config,
-        client,
-        safety_policy=safety_policy,
-    )
+    metadata = {"run_id": str(uuid4()), "started_at": utc_now(), "revision": 1}
+    if config.session_id is None:
+        run = run_unified_graph_query(query, config, client, safety_policy=safety_policy)
+        return persist_unified_run(run, config, metadata)
+    store = ConversationStore(config.conversation_db_path, config.repo_path, config.session_id)
+    with store.lock:
+        try:
+            turns, revision = store.load()
+        except (OSError, sqlite3.Error) as error:
+            raise RuntimeError("聊天历史读取失败；请检查聊天数据库路径与文件权限。") from error
+        history, omitted = history_messages(turns, config.max_history_chars)
+        run = run_unified_graph_query(
+            query, config, client, safety_policy=safety_policy,
+            history=history, omitted_turns=omitted,
+        )
+        run.trace["conversation"] = {
+            "session_id": store.key[1], "revision": revision,
+            "loaded_turns": len(turns), "omitted_turns": omitted,
+        }
+        return persist_unified_run(run, config, metadata)
 
 
 def resume_unified_query(
@@ -122,18 +148,61 @@ def resume_unified_query(
         raise ValueError("approval belongs to a different repository")
     from coding_rag.agent.graph_runtime import run_unified_graph_query
 
-    return run_unified_graph_query(
-        pending_run.query,
-        config,
-        client,
-        safety_policy=safety_policy,
-        resume_state=pending_run.resume_state,
-        write_approval=approval_fingerprint,
+    previous = pending_run.trace["run"]
+    metadata = {
+        "run_id": previous["run_id"],
+        "started_at": previous.get("started_at"),
+        "revision": previous.get("revision", 1) + 1,
+    }
+    conversation = pending_run.trace.get("conversation")
+
+    def resume():
+        """Resume the exact server-held state and retain its chat revision."""
+        run = run_unified_graph_query(
+            pending_run.query, config, client, safety_policy=safety_policy,
+            resume_state=pending_run.resume_state, write_approval=approval_fingerprint,
+        )
+        if conversation:
+            run.trace["conversation"] = dict(conversation)
+        return persist_unified_run(run, config, metadata)
+
+    if conversation:
+        store = ConversationStore(config.conversation_db_path, config.repo_path, config.session_id)
+        if store.key[1] != conversation["session_id"]:
+            raise ValueError("approval belongs to a different conversation")
+        with store.lock:
+            if store.load()[1] != conversation["revision"]:
+                raise ValueError("Conversation changed; start a new turn before approving")
+            return resume()
+    return resume()
+
+
+def persist_unified_run(run: UnifiedRun, config: UnifiedRunConfig, metadata: dict) -> UnifiedRun:
+    """Attach stable lifecycle metadata and persist a diagnostic copy after each return."""
+    conversation = run.trace.get("conversation")
+    if config.session_id and conversation and run.status in {"success", "partial"}:
+        store = ConversationStore(config.conversation_db_path, config.repo_path, config.session_id)
+        try:
+            store.append(run.query, run.answer, metadata["run_id"], conversation["revision"])
+            conversation["status"] = "saved"
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            conversation.update(status="failed", error_type=type(error).__name__)
+    elif conversation:
+        conversation["status"] = "pending" if run.status == "approval_required" else "not_saved"
+    now = utc_now()
+    run.trace["run"].update(metadata)
+    run.trace["run"]["updated_at"] = now
+    run.trace["run"]["finished_at"] = None if run.status == "approval_required" else now
+    for seq, event in enumerate(run.trace["events"], start=1):
+        event["seq"] = seq
+    storage = persist_trace(
+        run.trace, config.trace_db_path, source=config.trace_source, repo_path=config.repo_path,
     )
+    return replace(run, storage=storage)
 
 
 def build_hybrid_search_provider(config: UnifiedRunConfig):
-    """构建混合向量/BM25搜索可调用对象（含回退）。"""
+    """构建 BM25、元数据与结构评分融合的搜索提供者。"""
     def search(query: str, top_k: int) -> dict[str, Any]:
         """执行混合搜索。"""
         seed, recalled, final, retrieval_trace = retrieve_for_ask(
@@ -170,9 +239,9 @@ def serialize_search_results(results: list[Any], repo_path: str | Path) -> list[
     for rank, result in enumerate(results, start=1):
         chunk = result.chunk
         try:
-            display_path = str(chunk.file_path.resolve().relative_to(root)).replace("\\", "/")
+            display_path = chunk.file_path.resolve().relative_to(root).as_posix()
         except ValueError:
-            display_path = str(chunk.file_path).replace("\\", "/")
+            display_path = chunk.file_path.resolve().as_posix()
         rows.append(
             {
                 "rank": rank,
@@ -190,6 +259,8 @@ def serialize_search_results(results: list[Any], repo_path: str | Path) -> list[
 def build_unified_messages(
     query: str,
     config: UnifiedRunConfig,
+    history: list[dict[str, str]] | None = None,
+    omitted_turns: int = 0,
 ) -> list[dict[str, str]]:
     """构建统一模型消息列表。"""
     schemas = {
@@ -229,8 +300,12 @@ JSON 字段固定为 action, reason, answer, tool, arguments, expected_observati
 工具参数定义:
 {json.dumps(schemas, ensure_ascii=False)}
 """
+    system_prompt += "\n历史回答仅用于对话连续性；当前仓库事实需要重新读取证据，历史批准不能授权本轮工具。"
+    if omitted_turns:
+        system_prompt += f"\n上下文长度限制：已省略 {omitted_turns} 个完整历史轮次；不要猜测缺失内容，必要时请用户补充。"
     return [
         {"role": "system", "content": system_prompt},
+        *(history or []),
         {"role": "user", "content": query},
     ]
 
@@ -379,6 +454,22 @@ def compact_tool_result(tool: str, result: Any, *, max_chars: int) -> tuple[Any,
                 row["text"] = truncate_text(row["text"], per_result)
 
     returned_text = json.dumps(clean_result, ensure_ascii=False, default=str)
+    if len(returned_text) > max_chars and tool == "search_code" and isinstance(clean_result, dict):
+        # Never cut a JSON path midway: omit code bodies, then whole result rows.
+        for row in clean_result.get("results") or []:
+            if isinstance(row, dict):
+                row.pop("text", None)
+        clean_result["note"] = "Code bodies or complete rows omitted; use read_file with the returned path."
+        while clean_result.get("results") and len(json.dumps(clean_result, ensure_ascii=False, default=str)) > max_chars:
+            clean_result["results"].pop()
+        returned_text = json.dumps(clean_result, ensure_ascii=False, default=str)
+    if len(returned_text) > max_chars and tool == "read_file" and isinstance(clean_result, dict):
+        clean_result["text"] = ""
+        clean_result["note"] = "File content omitted; request a smaller line range."
+        returned_text = json.dumps(clean_result, ensure_ascii=False, default=str)
+    if len(returned_text) > max_chars and tool in {"search_code", "read_file"}:
+        clean_result = {"note": "Tool metadata exceeds context budget; increase max_context_chars."}
+        returned_text = json.dumps(clean_result, ensure_ascii=False)
     if len(returned_text) > max_chars:
         clean_result = {
             "preview": truncate_text(returned_text, max_chars),
@@ -419,7 +510,12 @@ def failed_safety_details(
 ) -> dict[str, Any] | None:
     """重新计算并序列化 run_command/apply_patch 的安全决策；其他工具返回 None。"""
     if tool == "run_command":
-        return decision_to_dict(executor.safety.check_command(str(arguments.get("cmd") or "")))
+        return decision_to_dict(
+            executor.safety.check_command(
+                str(arguments.get("cmd") or ""),
+                repo_path=executor.repo_path,
+            )
+        )
     if tool == "apply_patch":
         return decision_to_dict(executor.safety.check_patch(str(arguments.get("diff") or "")))
     return None
@@ -471,6 +567,7 @@ def unified_run_to_dict(run: UnifiedRun) -> dict[str, Any]:
     """序列化 UnifiedRun 为字典。"""
     return {
         "query": run.query,
+        **({"conversation": run.trace["conversation"]} if "conversation" in run.trace else {}),
         "status": run.status,
         "answer": run.answer,
         "execution": {
@@ -480,6 +577,7 @@ def unified_run_to_dict(run: UnifiedRun) -> dict[str, Any]:
         "approval": run.approval,
         "summary": run.trace.get("summary") or {},
         "trace": run.trace,
+        **({"storage": run.storage} if run.trace.get("run", {}).get("mode") == "unified" else {}),
     }
 
 

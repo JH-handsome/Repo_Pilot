@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from uuid import uuid4
 
 from coding_rag.agent.executor import AgentExecutor
 from coding_rag.agent.runtime import UnifiedRunConfig, resume_unified_query, run_unified_query
@@ -16,6 +17,7 @@ from coding_rag.rag.prompt import GenerationMode
 from coding_rag.rag.trace import render_trace_report, write_trace_json
 from coding_rag.tools.env import load_dotenv
 from coding_rag.tools.tokenizer import CodeTokenizer
+from coding_rag.storage.persistence import configured_trace_db
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +29,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RepoPilot：由 LLM 自动决定回答或调用代码工具")
     parser.add_argument("repo_path", nargs="?", help="代码仓库路径；不填则进入交互模式")
     parser.add_argument("query", nargs="?", help="问题或修改需求；不填则进入交互模式")
+    parser.add_argument("--session-id", help="聊天会话 UUID；复用此 ID 可在重启后继续对话")
+    parser.add_argument("--chat-db", help="聊天 SQLite 数据库路径；默认 artifacts/conversations.sqlite3")
     parser.add_argument("--interactive", action="store_true", help="进入连续交互模式")
     parser.add_argument("--top-k", type=int, default=5, help="每次代码搜索保留的结果数量")
     parser.add_argument("--candidate-k", type=int, help="邻居召回前的候选结果数量")
@@ -40,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--show-tokens", action="store_true", help="在执行前打印查询分词")
     parser.add_argument("--show-trace", action="store_true", help="打印统一运行 trace")
     parser.add_argument("--trace-out", help="保存本次统一 trace JSON")
+    parser.add_argument("--trace-db", help="SQLite trace 数据库路径；off 禁用；也可设置 REPOPILOT_TRACE_DB")
     parser.add_argument("--trace-include-text", action="store_true", help="在检索 trace 中保留完整代码文本")
     parser.add_argument("--agent-policy", help="Agent executor 安全策略 JSON 路径")
     parser.add_argument("--rollback", metavar="SNAPSHOT_ID", help="恢复一次已批准写操作的修改前快照")
@@ -118,6 +123,11 @@ def run_single_turn(
     if args.trace_out:
         write_trace_json(args.trace_out, run.trace)
     print(render_unified_run(run))
+    conversation = run.trace.get("conversation") or {}
+    if conversation.get("status") == "failed":
+        print("聊天历史保存失败，下次提问可能缺少本轮信息。", file=sys.stderr)
+    if conversation.get("omitted_turns"):
+        print(f"历史长度限制：本轮省略 {conversation['omitted_turns']} 个完整轮次。")
     if args.show_trace:
         print()
         print(render_trace_report(run.trace))
@@ -134,7 +144,9 @@ def run_interactive_cli(args: argparse.Namespace) -> int:
         print_llm_setup_hint(args.llm_provider, file=sys.stderr)
         return 2
 
+    args.session_id = getattr(args, "session_id", None) or str(uuid4())
     print("RepoPilot 交互模式")
+    print(f"会话 ID: {args.session_id}（可用 --session-id 恢复）")
     print(f"当前仓库: {repo_path}")
     print("写工具按调用逐次申请批准；Learning Mode 保持只读。")
     print("输入问题或修改需求，LLM 会自动决定直接回答或调用工具。")
@@ -212,6 +224,10 @@ def build_runtime_config(args: argparse.Namespace) -> UnifiedRunConfig:
         max_context_chars=args.llm_context_chars,
         include_trace_text=args.trace_include_text,
         agent_policy_path=args.agent_policy,
+        trace_db_path=configured_trace_db(getattr(args, "trace_db", None)),
+        trace_source="cli",
+        session_id=getattr(args, "session_id", None),
+        conversation_db_path=getattr(args, "chat_db", None),
     )
 
 
@@ -233,6 +249,11 @@ def render_unified_run(run) -> str:
         "",
         run.answer,
     ]
+    storage = getattr(run, "storage", {})
+    if storage.get("status") == "failed":
+        lines.append("运行记录保存失败；" + (
+            "已保存待补录副本。" if storage.get("pending") else "待补录副本也未能保存。"
+        ))
     approval = getattr(run, "approval", None)
     if approval:
         lines.extend(

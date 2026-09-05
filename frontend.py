@@ -10,7 +10,14 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+from uuid import UUID, uuid4
+import os
+import sqlite3
+from datetime import datetime, timezone
+
+from coding_rag.storage.sqlite import SQLiteTraceStore, TraceSchemaError
+from coding_rag.storage.persistence import configured_trace_db
 
 from coding_rag.agent.executor import AgentExecutor
 from coding_rag.agent.runtime import (
@@ -81,6 +88,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RepoPilot browser frontend")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--trace-db", help="SQLite trace 数据库路径；off 禁用；也可设置 REPOPILOT_TRACE_DB")
     parser.add_argument(
         "--allow-tool-execution",
         action="store_true",
@@ -97,6 +105,12 @@ class RepoPilotServer(ThreadingHTTPServer):
 
     def __init__(self, *args, **kwargs):
         """Initialize HTTP service state, including one-time approvals."""
+        self.trace_db_path = configured_trace_db(kwargs.pop("trace_db_path", None))
+        self.trace_read_token = kwargs.pop("trace_read_token", None)
+        if self.trace_read_token is None:
+            self.trace_read_token = os.environ.get("REPOPILOT_TRACE_READ_TOKEN", "")
+        if self.trace_read_token and len(self.trace_read_token) < 32:
+            raise ValueError("REPOPILOT_TRACE_READ_TOKEN must contain at least 32 characters")
         super().__init__(*args, **kwargs)
         self.pending_approvals = PendingApprovalStore()
 
@@ -105,10 +119,64 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
     """RepoPilot HTTP 请求处理器。"""
     def do_GET(self) -> None:
         """处理 GET 请求，返回首页 HTML。"""
-        if urlparse(self.path).path != "/":
+        path = urlparse(self.path).path
+        if path == "/api/traces" or path.startswith("/api/traces/"):
+            self.get_trace_history()
+            return
+        if path != "/":
             self.send_error(404)
             return
         self.send_html(build_index_html(self.server_allows_execution()))
+
+    def get_trace_history(self) -> None:
+        """Authenticate history reads before touching the server-bound database."""
+        token = self.server.trace_read_token
+        if not token:
+            self.send_json({"ok": False, "error": "trace history access is disabled"}, status=403)
+            return
+        supplied = self.headers.get("Authorization", "")
+        if not secrets.compare_digest(supplied.encode(), ("Bearer " + token).encode()):
+            self.send_json({"ok": False, "error": "trace history authentication required"}, status=401)
+            return
+        db_path = self.server.trace_db_path
+        if db_path is None:
+            self.send_json({"ok": False, "error": "trace storage is disabled"}, status=503)
+            return
+        try:
+            parsed = urlparse(self.path)
+            store = SQLiteTraceStore(db_path)
+            if parsed.path == "/api/traces":
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                if any(len(values) != 1 for values in query.values()):
+                    raise ValueError("duplicate query parameters")
+                params = {key: values[0] for key, values in query.items()}
+                limit = int(params.pop("limit", "50"))
+                cursor = params.pop("cursor", None)
+                for key in ("since", "until"):
+                    if key in params:
+                        timestamp = datetime.fromisoformat(params[key])
+                        if timestamp.tzinfo is None:
+                            raise ValueError("time filters must include a timezone")
+                        params[key] = timestamp.astimezone(timezone.utc).isoformat(timespec="microseconds")
+                result = store.list_traces(params, cursor, limit)
+            else:
+                run_id = parsed.path.removeprefix("/api/traces/")
+                UUID(run_id)
+                trace = store.get_trace(run_id)
+                if trace is None:
+                    self.send_json({"ok": False, "error": "trace not found"}, status=404)
+                    return
+                result = {"trace": trace}
+        except TraceSchemaError:
+            self.send_json({"ok": False, "error": "trace database schema is incompatible"}, status=503)
+            return
+        except ValueError as error:
+            self.send_json({"ok": False, "error": str(error)}, status=400)
+            return
+        except (OSError, sqlite3.Error):
+            self.send_json({"ok": False, "error": "trace storage is unavailable"}, status=503)
+            return
+        self.send_json({"ok": True, **result})
 
     def do_POST(self) -> None:
         """分发普通查询与只读教学会话请求。"""
@@ -133,6 +201,7 @@ class RepoPilotHandler(BaseHTTPRequestHandler):
                     payload,
                     server_allows_execution=self.server_allows_execution(),
                     approval_store=self.server.pending_approvals,
+                    trace_db_path=self.server.trace_db_path,
                 )
         except RequestBodyTooLarge as error:
             self.send_json({"ok": False, "error": str(error)}, status=413)
@@ -230,6 +299,7 @@ def run_frontend_query(
     *,
     server_allows_execution: bool = False,
     approval_store: PendingApprovalStore | None = None,
+    trace_db_path: str | None = None,
 ) -> dict:
     """Start or approve one browser run without accepting blanket execution permission."""
     if "execute_tools" in payload:
@@ -279,6 +349,9 @@ def run_frontend_query(
         generation_mode=GenerationMode(str(payload.get("mode") or "judge")),
         max_context_chars=int(payload.get("max_context_chars") or 12000),
         agent_policy_path=empty_to_none(payload.get("agent_policy")),
+        trace_db_path=trace_db_path,
+        trace_source="browser",
+        session_id=str(UUID(str(payload.get("session_id") or uuid4()))),
     )
     run = run_unified_query(query, config, client)
     return prepare_frontend_run_response(
@@ -401,7 +474,8 @@ def build_index_html(allow_tool_execution: bool = False) -> str:
 def main() -> None:
     """按命令行配置启动前端 HTTP 服务，并在退出时关闭服务器。"""
     args = parse_args()
-    server = RepoPilotServer((args.host, args.port), RepoPilotHandler)
+    load_dotenv()
+    server = RepoPilotServer((args.host, args.port), RepoPilotHandler, trace_db_path=args.trace_db)
     server.allow_tool_execution = args.allow_tool_execution
     execution_label = "per-call approval enabled" if args.allow_tool_execution else "approval disabled"
     print(f"RepoPilot frontend: http://{args.host}:{args.port} (tool execution: {execution_label})")
@@ -550,6 +624,7 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
       <label for="repo">仓库路径</label>
       <input id="repo" value="." />
       <div id="askControls">
+        <button id="newConversation" type="button">新对话</button>
         <label for="query">问题或需求</label>
         <textarea id="query" placeholder="例如：解释 BM25 索引流程，或修复 ASK 没有调用 LLM 的问题"></textarea>
       </div>
@@ -637,6 +712,43 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     });
     updateMode();
 
+    const chatStorageKey = "repopilot.chat.sessions.v1";
+    let chatSessions = {};
+    try { chatSessions = JSON.parse(sessionStorage.getItem(chatStorageKey) || "{}"); } catch (_) {}
+    try {
+      document.getElementById("repo").value = sessionStorage.getItem("repopilot.chat.repo") || ".";
+    } catch (_) {}
+    if (!chatSessions || typeof chatSessions !== "object" || Array.isArray(chatSessions)) chatSessions = {};
+    function newChatId() {
+      if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+      // getRandomValues also works when the local server is opened over LAN HTTP.
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      bytes[6] = (bytes[6] & 15) | 64;
+      bytes[8] = (bytes[8] & 63) | 128;
+      const hex = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+    function chatSessionId(reset = false) {
+      const key = value("repo").trim() || ".";
+      if (reset || !Object.prototype.hasOwnProperty.call(chatSessions, key)) {
+        Object.defineProperty(chatSessions, key, {value: newChatId(), writable: true, enumerable: true, configurable: true});
+      }
+      try {
+        sessionStorage.setItem(chatStorageKey, JSON.stringify(chatSessions));
+        sessionStorage.setItem("repopilot.chat.repo", key);
+      } catch (_) {
+        statusEl.textContent = "浏览器存储不可用，刷新后将开始新对话。";
+      }
+      return chatSessions[key];
+    }
+    document.getElementById("newConversation").addEventListener("click", () => {
+      if (requestInFlight) return;
+      chatSessionId(true);
+      document.getElementById("query").value = "";
+      outputEl.innerHTML = '<div class="status">已开始新对话。</div>';
+      statusEl.textContent = "新对话";
+    });
+
     function runTask() {
       if (appMode.value === "learning") return runLearningTask();
       return runAskTask();
@@ -649,15 +761,16 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
       runBtn.disabled = true;
       statusEl.textContent = "处理中...";
       outputEl.innerHTML = '<div class="status">LLM 正在判断是否需要调用工具...</div>';
-      const payload = {
-        repo_path: value("repo"),
-        query: value("query"),
-        top_k: Number(value("topK")),
-        recall_window: Number(value("recall")),
-        provider: value("provider"),
-        mode: value("mode"),
-      };
       try {
+        const payload = {
+          repo_path: value("repo"),
+          query: value("query"),
+          session_id: chatSessionId(),
+          top_k: Number(value("topK")),
+          recall_window: Number(value("recall")),
+          provider: value("provider"),
+          mode: value("mode"),
+        };
         const response = await fetch("/api/run", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
@@ -911,6 +1024,9 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
           <div class="meta">status=${escapeHtml(data.status)} write_executed=${execution.enabled ? "yes" : "no"}</div>
           <pre>${escapeHtml(data.answer)}</pre>
         </div>
+        ${data.storage && data.storage.status === "failed" ? `<div class="block"><p>运行记录保存失败；${data.storage.pending ? "已保存待补录副本。" : "待补录副本也未能保存。"}</p></div>` : ""}
+        ${data.conversation && data.conversation.status === "failed" ? '<div class="block failed">本轮聊天历史保存失败；下次提问可能缺少本轮信息。</div>' : ""}
+        ${data.conversation && data.conversation.omitted_turns ? `<div class="block">历史较长，本轮省略了 ${escapeHtml(data.conversation.omitted_turns)} 个历史轮次；原始记录仍保存在本地。</div>` : ""}
         ${approvalBlock}
         ${changesBlock}
         <div class="block">

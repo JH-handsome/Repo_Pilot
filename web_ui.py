@@ -6,6 +6,7 @@ import json
 import threading
 import tkinter as tk
 from pathlib import Path
+from uuid import uuid4
 from tkinter import filedialog, messagebox, ttk
 
 from coding_rag.tools.bm25 import BM25Retriever, SearchResult
@@ -13,7 +14,8 @@ from coding_rag.repository.chunks import split_python_files
 from coding_rag.tools.recall import expand_with_neighbor_chunks
 from coding_rag.tools.env import ensure_dotenv, load_dotenv
 from coding_rag.repository.files import load_python_files
-from coding_rag.rag.answer_generator import build_generator
+from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query
+from coding_rag.rag.llm_client import OpenAICompatibleChatClient, build_llm_config
 from coding_rag.rag.prompt import GenerationMode
 from coding_rag.tools.filter import filter_recalled_results
 from scripts.retrieval_eval import (
@@ -41,6 +43,7 @@ class RepoPilotUI:
 
     def __init__(self, root: tk.Tk) -> None:
         """初始化 RepoPilot 用户界面及所有控件变量。"""
+        self.session_id_var = tk.StringVar(value=str(uuid4()))
         self.root = root
         self.root.title("RepoPilot Prompt UI")
         self.root.geometry("1100x760")
@@ -73,6 +76,10 @@ class RepoPilotUI:
 
         ttk.Label(controls, text="Question / prompt").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
         ttk.Entry(controls, textvariable=self.query_var, width=72).grid(row=1, column=1, padx=8, pady=(8, 0))
+
+        ttk.Label(controls, text="会话 ID（可粘贴恢复）").grid(row=2, column=0, sticky=tk.W)
+        ttk.Entry(controls, textvariable=self.session_id_var, width=72).grid(row=2, column=1, padx=8)
+        ttk.Button(controls, text="新对话", command=self._new_conversation).grid(row=2, column=2)
 
         numeric = ttk.Frame(self.root, padding=(10, 0, 10, 0))
         numeric.pack(fill=tk.X)
@@ -128,6 +135,12 @@ class RepoPilotUI:
         self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+    def _new_conversation(self) -> None:
+        """Start an isolated chat while retaining the selected repository."""
+        self.session_id_var.set(str(uuid4()))
+        self._set_output("")
+        self._set_status("新对话")
+
     def _pick_repo_path(self) -> None:
         """弹出目录选择对话框，让用户选取仓库路径。"""
         selected = filedialog.askdirectory(title="选择要搜索的仓库")
@@ -151,6 +164,27 @@ class RepoPilotUI:
         try:
             repo_path = self.repo_path_var.get().strip()
             query = self.query_var.get().strip()
+            if self.use_llm_var.get():
+                load_dotenv()
+                run = run_unified_query(
+                    query,
+                    UnifiedRunConfig(
+                        repo_path=repo_path, top_k=self.top_k_var.get(),
+                        chunk_size=self.chunk_size_var.get(), overlap=self.overlap_var.get(),
+                        recall_window=self.recall_window_var.get(),
+                        generation_mode=GenerationMode(self.mode_var.get()),
+                        session_id=self.session_id_var.get().strip(),
+                    ),
+                    OpenAICompatibleChatClient(build_llm_config(provider=self.provider_var.get())),
+                )
+                text = run.answer + "\n\n" + render_trace_report(run.trace)
+                if run.status == "approval_required":
+                    text += "\n此桌面入口不执行写操作，请在浏览器或 CLI 中逐次批准。"
+                if (run.trace.get("conversation") or {}).get("status") == "failed":
+                    text += "\n聊天历史保存失败。"
+                self._set_output(text)
+                self._set_status(run.status)
+                return
             python_files = load_python_files(repo_path)
             chunks = split_python_files(
                 python_files,
@@ -195,17 +229,6 @@ class RepoPilotUI:
                 "-" * 80,
                 self._render_results(results),
             ]
-
-            if self.use_llm_var.get():
-                ensure_dotenv()
-                load_dotenv()
-                generator = build_generator(
-                    provider=self.provider_var.get(),
-                    mode=GenerationMode(self.mode_var.get()),
-                    max_context_chars=12000,
-                )
-                answer = generator.generate(query, results)
-                lines.extend(["", "=" * 80, f"LLM result ({self.mode_var.get()})", "-" * 80, answer.strip()])
 
             self._set_output("\n".join(lines))
             self._set_status("完成")

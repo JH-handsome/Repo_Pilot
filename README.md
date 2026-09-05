@@ -194,7 +194,7 @@ python main.py . "linked list cycle" --llm-provider custom
 
 ## Agent 工作流
 
-用户不再选择 ASK 或 Agent。CLI 与浏览器都通过 `run_unified_query()` 进入普通 Agent 的 LangGraph；图中的 `model -> tool -> model` 条件循环处理每轮 `answer` 或 `tool` JSON 决策，最终进入 `finalize` 或安全失败节点：
+用户不再选择 ASK 或 Agent。CLI、浏览器和启用 LLM 的 Tk 桌面查询都通过 `run_unified_query()` 进入普通 Agent 的 LangGraph；图中的 `model -> tool -> model` 条件循环处理每轮 `answer` 或 `tool` JSON 决策，最终进入 `finalize` 或安全失败节点：
 
 ```bash
 python main.py . "解释统一 trace 的事件顺序" --show-trace
@@ -211,7 +211,7 @@ CLI 会在每次写调用前提示确认。需要恢复时使用执行结果中�
 python main.py /path/to/repo --rollback SNAPSHOT_ID
 ```
 
-浏览器会在修改后直接展示 diff，并提供“恢复到修改前”按钮。`run_command` 必须在 `affected_files` 中声明所有可能修改的仓库相对路径；快照与回滚保证只覆盖这些已声明文件。
+浏览器会在修改后直接展示 diff，并提供“恢复到修改前”按钮。`run_command` 必须在 `affected_files` 中声明所有可能修改的仓库相对路径；命令里的显式路径参数也必须使用仓库相对路径，绝对路径、`..`、`~` 和符号链接逃逸会在审批前被拒绝。快照与回滚保证只覆盖这些已声明文件。
 
 普通 Agent 的 LangChain 工具适配层公开五个严格命名工具；实际仓库访问仍统一进入 `AgentExecutor.call()`。Learning Mode 使用另一套只读图和工具表，只绑定 `search_code`、`read_file`，不会因普通 Agent 获得写工具而改变权限。
 
@@ -233,6 +233,82 @@ python web_ui.py
 ```
 
 界面支持选择仓库、输入问题、调整检索参数、开启 LLM、运行评测、导出 trace、查看 bad case 和自动调参。
+
+## Trace 数据库存储（第一阶段）
+
+CLI 与浏览器普通 Agent 默认在项目的 `artifacts/traces.sqlite3` 保存运行 trace。
+使用 Python 标准库 SQLite，无需安装数据库服务；直接调用 Python API 时，需显式设置
+`UnifiedRunConfig(trace_db_path=...)` 才会保存。Learning Mode、旧离线流程与评测脚本暂不自动落库。
+
+```bash
+python frontend.py --trace-db artifacts/traces.sqlite3
+python main.py . "解释检索流程" --trace-db artifacts/traces.sqlite3
+python main.py . "解释检索流程" --trace-db off
+```
+
+也可以设置 `REPOPILOT_TRACE_DB`；命令行参数优先，值为 `off` 时禁用数据库保存。
+自定义相对路径按启动工作目录解析。数据库位于本机磁盘；默认数据库及 WAL 附属文件已被 Git 忽略。
+
+数据分成 `trace_runs` 和 `trace_events` 两张表。前者保存运行摘要与经过过滤的完整 trace JSON，
+后者保存可查询的事件序号、状态、时间、耗时和错误摘要。数据库结构版本使用 `PRAGMA user_version`，
+独立于 JSON 的 `trace_version`。未知结构版本及已有其他表的未版本化数据库会被拒绝，不自动覆盖。
+
+每次普通 Agent 返回结果或等待授权时，用一个事务保存累计 trace。等待授权与批准后的运行沿用
+同一 `run_id`，递增 `revision`，仅追加新事件；重复保存无副作用，旧版本不能覆盖新版本，
+同版本不同内容会报告冲突。等待授权时 `finished_at` 为空。时间使用 UTC；这不是逐节点实时落库，
+进程中断前尚未返回的事件不会被保存，输入校验/初始化失败也不保证生成 trace。
+
+### 历史查询接口
+
+历史查询默认关闭，需要在服务启动前配置至少 32 字符的独立随机令牌
+`REPOPILOT_TRACE_READ_TOKEN`。每次历史请求必须携带 `Authorization: Bearer <令牌>`。
+令牌不进入 HTML、trace 或应用输出；未配置返回 403，认证失败返回 401。
+该令牌可读取本服务数据库中全部运行，不提供按用户隔离。服务继续面向本机使用。
+
+```powershell
+$env:REPOPILOT_TRACE_READ_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(32))"
+python frontend.py
+```
+
+在配置相同令牌的调用环境中查询：
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:REPOPILOT_TRACE_READ_TOKEN" }
+Invoke-RestMethod 'http://127.0.0.1:8765/api/traces?status=failed&limit=20' -Headers $headers
+```
+
+- `GET /api/traces`：返回 `items` 和 `next_cursor`；列表不包含完整 trace。
+- 支持 `repo_key`、`mode`、`status`、`source`、`session_id`、`since`、`until` 筛选。
+  时间筛选针对更新时间，必须包含时区；`limit` 为 1–100，默认 50。
+  后续页将 `next_cursor` URL 编码后作为 `cursor` 传入，并保持相同筛选条件。
+- `GET /api/traces/{run_id}`：返回经过过滤的完整 `trace`，可保存为 JSON；不存在返回 404。
+- 接口只读取服务启动时配置的数据库，不接受客户端指定数据库路径。
+- 数据库关闭或不可用返回 503。已有 `/api/run` 响应额外包含 `storage` 保存状态。
+
+分页按更新时间和运行 ID 排序。正在更新的运行可能改变列表位置，跨页查询不承诺数据库快照一致性。
+历史列表页面、教学与评测接入、旧 JSON/JSONL 导入和统计面板属于后续阶段。
+
+### 保存失败与补录
+
+数据库写入失败不重跑模型或工具，也不改变本次 Agent 的业务结果。CLI/浏览器会提示保存失败；
+系统尝试在数据库同目录的 `trace_pending/` 写入独立 JSON 副本，`storage.pending` 表示副本是否成功保存。
+两处都无法写入时会明确报告失败，不承诺数据已保存。
+
+```bash
+python scripts/replay_trace_pending.py artifacts/trace_pending/某个文件.json --trace-db artifacts/traces.sqlite3
+```
+
+补录脚本只保存 trace，重复执行不会重复插入；源文件保留，不自动删除。
+数据库与待补录副本都会移除授权对象、恢复状态、消息列表和原始模型输出，并遮盖已配置凭据及常见凭据格式。
+自由文本过滤是尽力识别，不能保证识别所有任意格式的秘密；查询、代码片段、diff 和工具结果仍属于本地诊断数据。
+原有 `--trace-out` 导出行为保持不变，不受数据库过滤逻辑影响。
+数据库只用于诊断历史，不能据此在服务重启后恢复工具执行或授权。
+
+验证数据库接入：
+
+```bash
+python -m unittest tests.test_trace_storage tests.test_unified_runtime tests.test_trace tests.test_frontend tests.test_interactive_cli
+```
 
 ## 检索评测
 
@@ -302,3 +378,52 @@ python scripts/patch_leetcode_imports.py datasets/leetcode-python
 python -m unittest
 python -m compileall coding_rag main.py frontend.py web_ui.py scripts tests
 ```
+
+
+### 普通聊天的多轮历史与恢复
+
+普通聊天使用独立的 `artifacts/conversations.sqlite3`，可用环境变量
+`REPOPILOT_CHAT_DB`、CLI 的 `--chat-db` 或 Python 配置的 `conversation_db_path` 指定。
+仅依赖 Python 标准库 SQLite，不增加安装依赖。数据库保存用户问题和最终回答，
+按规范化的仓库绝对路径与 UUID `session_id` 隔离；关闭 trace 存储不关闭聊天历史。
+
+- 浏览器在当前标签页的 `sessionStorage` 保存会话 ID 与仓库选择，刷新后继续同一对话。
+  点击“新对话”生成新 ID；旧记录仍在本地，但不会传给新对话。关闭标签页后不自动找回 ID。
+- CLI 交互模式自动生成并显示会话 ID。重启后使用下面的命令继续原对话：
+  `python main.py D:/develop/repo_pilot --interactive --session-id <原会话UUID>`。
+  单次 CLI/Python 调用未指定 `session_id` 时仍为独立请求。
+- Tk 桌面的 LLM 查询使用相同运行时；可复制“会话 ID”并在重启后粘贴恢复，或点“新对话”。
+  未启用 LLM 的检索和评测仍使用各自的离线／评测组件。
+- `POST /api/run` 接受 `session_id`；省略时生成新 ID，并在响应 `conversation.session_id`
+  返回。客户端应重复提交这个 ID。历史由服务端读取，不接受客户端提供的 messages。
+
+这里采用“完成轮次持久化 + 每轮显式装载历史”，没有配置 LangGraph checkpointer，
+也不依赖 `thread_id` 隐式恢复。Graph 每轮仍重建工具与批准状态，但初始 messages
+包含系统规则、历史用户／助手消息和当前问题；图内 reducer 累积本轮工具与最终助手消息。
+只保存成功／部分完成的轮次；失败与等待批准不会作为完成轮次写入。批准完成后只追加一次。
+同一服务内的相同会话串行处理，SQLite 修订检查防止跨进程并发覆盖；冲突会报告保存失败。
+
+模型默认使用最多 24,000 字符的历史正文（不含消息封装），可通过 Python 配置
+`max_history_chars` 调整。优先保留首轮和最近的完整轮次，不切断用户／助手消息对；
+无法放入预算的轮次会省略，并在系统提示与响应 `conversation.omitted_turns` 中明确标记。
+数据库中的原始轮次不受此裁剪影响。工具观察另受 `max_context_chars` 限制；
+搜索结果过长时优先省略正文和完整行，保留可直接传入 `read_file` 的完整路径。
+
+历史回答仅帮助理解对话，涉及当前仓库事实时仍须重新读取证据。服务重启可恢复已保存的聊天，
+不会恢复尚未批准的工具调用，也不会从历史重放写操作。聊天保存失败会在页面／CLI 提示。
+Learning Mode 保持原有的页面内存签名会话，刷新重新开始，服务重启后旧签名失效。
+这些机制均与开发助手的 `.engramory-memory` 不同。
+
+兼容边界：`AgentExecutor` 和 `langchain_tools` 是当前 Graph 的共用工具层；
+`planner.py`、`workflow.py` 和旧问答生成器仍服务于兼容 API、离线规划或评测，
+不会作为普通聊天的失败回退。Graph 的 `safe_fallback` 只结束本次运行并报告错误。
+
+复测：同一对话先说“记住我的项目代号 cobalt-731”，再问“代号是什么”；刷新页面、
+重启服务后再问。点击“新对话”后再次询问，模型不应从旧会话获得代号。
+再要求搜索一个明确函数，并使用搜索返回的 `path` 读取文件，检查 Trace Events 中
+`search_code -> read_file` 均成功。JSON 中 `\\` 表示转义，不等于路径中有两个分隔符；
+仓库外绝对路径会被读取权限拒绝，这是预期边界。
+
+离线回归：`python -m unittest tests.test_conversation_runtime -v`；完整回归：
+`python -m unittest discover -s tests -q`。测试使用可检查输入的模型替身，包含新 Python
+进程恢复、真实 HTTP 服务重建与浏览器脚本刷新测试，不需要真实模型 API 密钥。

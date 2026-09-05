@@ -169,11 +169,12 @@ class ReadOnlyAgentTools:
         return resolved
 
     def display_path(self, path: Path) -> str:
-        """将路径解析为相对于仓库根目录的格式，若无法相对则返回绝对路径。"""
+        """返回相对于仓库根目录的路径，无法相对时返回绝对路径。"""
+        resolved_path = path.resolve()
         try:
-            return str(path.resolve().relative_to(self.repo_path)).replace("\\", "/")
+            return resolved_path.relative_to(self.repo_path.resolve()).as_posix()
         except ValueError:
-            return str(path).replace("\\", "/")
+            return resolved_path.as_posix()
 
     @property
     def chunks(self) -> list[CodeChunk]:
