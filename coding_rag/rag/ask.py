@@ -67,7 +67,7 @@ def retrieve_code(
         - trace: 全链路 trace 信息字典。
 
     Raises:
-        ValueError: 未找到 Python 代码块。
+        ValueError: 未找到文本源码代码块。
     """
     registry = index_registry or GLOBAL_REPOSITORY_INDEX_REGISTRY
     access = registry.get(RepositoryIndexKey.create(

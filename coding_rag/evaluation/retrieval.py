@@ -12,8 +12,8 @@ from statistics import mean
 from typing import Protocol, Sequence
 
 from coding_rag.rag.prompt import compact_results_for_context
-from coding_rag.repository.chunks import CodeChunk, split_python_files
-from coding_rag.repository.files import PythonFile, load_python_files
+from coding_rag.repository.chunks import CodeChunk, split_source_files
+from coding_rag.repository.files import SourceFile, load_source_files
 from coding_rag.tools.bm25 import DEFAULT_GRAPH_WEIGHT, DEFAULT_PATH_WEIGHT, BM25Retriever, SearchResult
 from coding_rag.tools.filter import filter_recalled_results
 from coding_rag.tools.recall import expand_with_neighbor_chunks
@@ -96,7 +96,7 @@ class RetrievalEvalConfig:
 class PreparedRetrievalPipeline:
     """Repository files, chunks, and index shared by every benchmark query."""
     config: RetrievalEvalConfig
-    files: list[PythonFile]
+    files: list[SourceFile]
     chunks: list[CodeChunk]
     retriever: BM25Retriever
     index_build_ms: float
@@ -105,10 +105,10 @@ class PreparedRetrievalPipeline:
     def build(cls, config: RetrievalEvalConfig) -> "PreparedRetrievalPipeline":
         """Scan, chunk, and index the configured repository exactly once."""
         started = time.perf_counter()
-        files = load_python_files(config.repo_path, exclude_roots=config.exclude_roots)
-        chunks = split_python_files(files, chunk_size=config.chunk_size, overlap=config.overlap)
+        files = load_source_files(config.repo_path, exclude_roots=config.exclude_roots)
+        chunks = split_source_files(files, chunk_size=config.chunk_size, overlap=config.overlap)
         if not chunks:
-            raise ValueError("repository contains no indexable Python chunks")
+            raise ValueError("repository contains no indexable source chunks")
         retriever = BM25Retriever(
             chunks,
             graph_weight=config.graph_weight,
@@ -313,7 +313,7 @@ def dataset_sha256(path: str | Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def repo_fingerprint(files: Sequence[PythonFile], root: Path) -> str:
+def repo_fingerprint(files: Sequence[SourceFile], root: Path) -> str:
     """Hash indexed relative paths and contents into a portable repository identity."""
     digest = hashlib.sha256()
     for item in sorted(files, key=lambda value: _normalized(value.path, root)):

@@ -11,6 +11,7 @@
 
 from enum import Enum
 from dataclasses import dataclass
+from coding_rag.repository.files import source_language
 
 
 class GenerationMode(str, Enum):
@@ -106,7 +107,7 @@ CODE_GENERATE_SYSTEM_PROMPT = """你是一个专业的代码生成助手。你�
 
 ## 代码生成规则
 1. 参考优先: 优先参考提供的代码块，借鉴其设计思想、代码风格和实现模式。
-2. 质量保证: 生成的代码应该正确、可读、高效，并遵循 Python 最佳实践。
+2. 质量保证: 使用用户指定或目标仓库实际使用的语言，遵循该语言的最佳实践。
 3. 适当注释: 在关键部分添加清晰的注释以解释实现逻辑。
 4. 引用标注: 在代码开头或关键部分标注参考来源（文件路径和行号）。
 5. 完整实现: 确保生成的代码逻辑完整，在给定输入下可以独立运行。
@@ -115,7 +116,7 @@ CODE_GENERATE_SYSTEM_PROMPT = """你是一个专业的代码生成助手。你�
 请按以下结构输出：
 - ## 代码描述: 简要描述生成代码的功能和设计思想
 - ## 参考来源: 基于以下代码块生成 - [文件路径:行号范围] - 参考内容
-- ## 生成的代码: [具有完整实现的生成代码，在 Python 代码块中]
+- ## 生成的代码: [具有完整实现的生成代码，代码块标注实际语言]
 - ## 使用示例（如适用）: [使用示例代码]
 """
 
@@ -153,7 +154,7 @@ LEETCODE_SYSTEM_PROMPT = """你是一个专业的算法问题解答助手。你�
 - ## 解题思路: 简要描述算法思路和选择该思路的原因
 - ## 算法复杂度: 时间复杂度 - [分析]；空间复杂度 - [分析]
 - ## 引用代码: 基于以下代码块参考 - [文件路径:行号范围] - 参考内容
-- ## 完整解答: [具有完整实现的 Solution 类，在 Python 代码块中]
+- ## 完整解答: [具有完整实现的 Solution 类，代码块标注实际语言]
 """
 
 
@@ -188,9 +189,9 @@ API_SYSTEM_PROMPT = """你是一个专业的 API 使用指南助手。你的任�
 请按以下结构输出：
 - ## API 概述: 简要描述 API 的功能和主要用途
 - ## 参考来源: 基于以下代码块参考 - [文件路径:行号范围] - 参考内容
-- ## 基本用法: [最简单的用法示例，在 Python 代码块中]
-- ## 完整示例: [包含错误处理的完整用法示例，在 Python 代码块中]
-- ## 常见场景: [常见使用场景示例，在 Python 代码块中]
+- ## 基本用法: [最简单的用法示例，代码块标注实际语言]
+- ## 完整示例: [包含错误处理的完整用法示例，代码块标注实际语言]
+- ## 常见场景: [常见使用场景示例，代码块标注实际语言]
 - ## 注意事项: [使用注意事项 1]；[使用注意事项 2]
 """
 
@@ -313,7 +314,8 @@ def format_results_as_context_with_ranges(
             f"(score={block_info.score:.4f}, {source_label}={sources}{chunk_note})"
         )
         code = block_info.text.rstrip()
-        block = f"{header}\n```python\n{code}\n```"
+        language = source_language(block_info.file_path)
+        block = f"{header}\n```{language}\n{code}\n```"
         visible_lines = len(code.splitlines())
 
         # 计算剩余可用字符数
@@ -323,13 +325,13 @@ def format_results_as_context_with_ranges(
 
         # 如果代码块超过剩余字符，则截断
         if len(block) > remaining:
-            header_len = len(header) + len("\n```python\n```")
+            header_len = len(header) + len(f"\n```{language}\n```")
             max_code_len = max(0, remaining - header_len - 20)
             if max_code_len > 0:
                 visible_code = code[:max_code_len]
                 visible_lines = visible_code.count("\n")
                 truncated_code = visible_code + "\n...[代码已截断]"
-                block = f"{header}\n```python\n{truncated_code}\n```"
+                block = f"{header}\n```{language}\n{truncated_code}\n```"
             else:
                 block = block[:max(0, remaining - 40)].rstrip() + "\n...[代码已截断]"
                 visible_lines = 0

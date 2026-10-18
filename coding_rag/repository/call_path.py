@@ -91,6 +91,8 @@ class PythonCallPathIndex:
         self.chunk_indexes: dict[str, list[int]] = {}
         self._module_cache: OrderedDict[str, ModuleCalls] = OrderedDict()
         for key, file_index in repo_index.files.items():
+            if file_index.path.suffix.casefold() != ".py":
+                continue
             self.module_paths[file_index.module] = key
             if file_index.module.endswith(".__init__"):
                 self.module_paths[file_index.module.removesuffix(".__init__")] = key

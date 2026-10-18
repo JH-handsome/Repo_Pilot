@@ -11,6 +11,8 @@ def build_dependency_graph(repo_index: RepoIndex) -> dict[str, tuple[str, ...]]:
     """Build an undirected file graph from imports resolved to indexed modules."""
     module_paths: dict[str, str] = {}
     for path, file_index in repo_index.files.items():
+        if file_index.path.suffix.casefold() != ".py":
+            continue
         module = file_index.module.casefold()
         module_paths[module] = path
         if module.endswith(".__init__"):

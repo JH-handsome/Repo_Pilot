@@ -136,6 +136,9 @@ def build_file_index(chunks: list[CodeChunk], display_path: Path | None = None) 
     module = module_name(metadata_path)
     directories = tuple(normalize_path(metadata_path).split("/")[:-1])
 
+    if path.suffix.casefold() not in {".py", ".pyi", ".pyw"}:
+        return FileIndex(path=path, module=module, directories=directories)
+
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -307,10 +310,10 @@ def import_terms(name: str) -> list[str]:
 
 
 def module_name(path: Path) -> str:
-    """将路径转换为 Python 模块名（去除 .py 后缀并将路径分隔符替换为点号）。"""
+    """Build a module label, stripping only Python source suffixes."""
     normalized = normalize_path(path)
-    if normalized.endswith(".py"):
-        normalized = normalized[:-3]
+    if path.suffix.casefold() in {".py", ".pyi", ".pyw"}:
+        normalized = normalized[:-len(path.suffix)]
     return normalized.replace("/", ".")
 
 

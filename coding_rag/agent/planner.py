@@ -232,7 +232,7 @@ def collect_readonly_observations(task: str, config: AgentPlanConfig) -> list[di
 
     calls: list[tuple[str, dict]] = [
         ("search_code", {"query": task, "top_k": config.top_k}),
-        ("list_files", {"pattern": "**/*.py", "limit": 50}),
+        ("list_files", {"pattern": "**/*", "limit": 50}),
     ]
     for identifier in extract_task_identifiers(task, limit=3):
         calls.append(("inspect_symbol", {"symbol": identifier, "context_lines": 2}))

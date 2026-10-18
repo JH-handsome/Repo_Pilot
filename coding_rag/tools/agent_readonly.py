@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from coding_rag.repository.chunks import CodeChunk, split_python_files
-from coding_rag.repository.files import load_python_files, should_skip
+from coding_rag.repository.chunks import CodeChunk, split_source_files
+from coding_rag.repository.files import load_source_files, read_source_text, should_skip
 from coding_rag.repository.index import RepoIndex, build_repo_index, extract_symbols
 from coding_rag.repository.call_path import PythonCallPathIndex
 from coding_rag.repository.search_index import PreparedRepositoryIndex
@@ -56,7 +56,7 @@ class ReadOnlyAgentTools:
             )
         if name == "list_files":
             return self.list_files(
-                pattern=str(args.get("pattern") or "**/*.py"),
+                pattern=str(args.get("pattern") or "**/*"),
                 limit=int(args.get("limit") or 200),
             )
         if name == "inspect_symbol":
@@ -106,7 +106,10 @@ class ReadOnlyAgentTools:
         if not file_path.is_file():
             raise AgentToolError(f"Path is not a file: {path}")
 
-        lines = file_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        text = read_source_text(file_path)
+        if text is None:
+            raise AgentToolError(f"File is binary, too large, or not supported text: {path}")
+        lines = text.splitlines()
         start = max(1, start_line or 1)
         end = min(len(lines), end_line or len(lines))
         if end < start:
@@ -122,7 +125,7 @@ class ReadOnlyAgentTools:
             "text": "\n".join(numbered),
         }
 
-    def list_files(self, pattern: str = "**/*.py", limit: int = 200) -> list[str]:
+    def list_files(self, pattern: str = "**/*", limit: int = 200) -> list[str]:
         """列出仓库文件，排除忽略目录，遵守数量限制。"""
         if limit <= 0:
             return []
@@ -293,9 +296,9 @@ class ReadOnlyAgentTools:
                 self._repo_index = prepared.retriever.repo_index
                 self._retriever = prepared.retriever
             else:
-                python_files = load_python_files(self.repo_path)
-                self._chunks = split_python_files(
-                    python_files,
+                source_files = load_source_files(self.repo_path)
+                self._chunks = split_source_files(
+                    source_files,
                     chunk_size=self.chunk_size,
                     overlap=self.overlap,
                 )
@@ -308,7 +311,7 @@ class ReadOnlyAgentTools:
             self.chunks
         if self._retriever is None:
             if not self.chunks:
-                raise AgentToolError("No Python code chunks found in repository")
+                raise AgentToolError("No source code chunks found in repository")
             self._retriever = BM25Retriever(self.chunks)
         return self._retriever
 
