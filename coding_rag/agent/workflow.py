@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Protocol
 
 from coding_rag.agent.memory import AgentMemory, AgentMemoryStore, build_memory
-from coding_rag.repository.chunks import split_python_files
-from coding_rag.repository.files import load_python_files
+from coding_rag.repository.chunks import split_source_files
+from coding_rag.repository.files import load_source_files
 from coding_rag.tools.bm25 import BM25Retriever, SearchResult, is_test_path
 from coding_rag.tools.filter import filter_recalled_results
 from coding_rag.tools.recall import expand_with_neighbor_chunks
@@ -153,10 +153,10 @@ def retrieve_agent_context(
     config: CodeAgentConfig,
 ) -> tuple[list[SearchResult], list[SearchResult], list[SearchResult], dict]:
     """检索并召回任务相关的代码上下文。"""
-    python_files = load_python_files(config.repo_path)
-    chunks = split_python_files(python_files, chunk_size=config.chunk_size, overlap=config.overlap)
+    source_files = load_source_files(config.repo_path)
+    chunks = split_source_files(source_files, chunk_size=config.chunk_size, overlap=config.overlap)
     if not chunks:
-        raise ValueError("未找到 Python 代码块，请检查 repo_path 和文件内容")
+        raise ValueError("未找到源码代码块，请检查 repo_path 和文件内容")
 
     retriever = BM25Retriever(chunks)
     candidate_k = config.candidate_k or config.top_k
@@ -629,7 +629,12 @@ def enrich_task_profile(task_profile: TaskProfile, results: list[SearchResult]) 
 def build_recommended_checks(kind: str, files: list[str]) -> list[str]:
     """根据任务类型和文件列表构建推荐的验证命令。"""
     checks: list[str] = []
-    test_modules = [test_module_name(path) for path in files if is_test_path(path)]
+    python_files = [path for path in files if Path(path).suffix.casefold() in {".py", ".pyi", ".pyw"}]
+    if files and len(python_files) != len(files):
+        checks.append("按目标仓库的文档和配置运行对应语言的测试、类型检查与构建。")
+        if not python_files:
+            return checks
+    test_modules = [test_module_name(path) for path in python_files if is_test_path(path)]
     for module in test_modules:
         checks.append(f"python -m unittest {module}")
 

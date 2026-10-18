@@ -83,7 +83,7 @@ class RepositorySearchIndexTest(unittest.TestCase):
         self.assertIn("manifest_scan_ms", second_index)
         self.assertEqual(second["retrieval_trace"]["summary"]["index_status"], "hit")
 
-    def test_add_modify_delete_invalidate_and_non_python_does_not(self):
+    def test_add_modify_delete_invalidate_and_documentation_does_not(self):
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self.make_repo(root)

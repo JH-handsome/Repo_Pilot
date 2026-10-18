@@ -13,6 +13,21 @@ from coding_rag.tools.agent_readonly import AgentToolError
 
 
 DEFAULT_ALLOWED_COMMAND_PREFIXES: tuple[tuple[str, ...], ...] = (
+    ("npm", "test"),
+    ("npm", "run", "test"),
+    ("npm", "run", "build"),
+    ("pnpm", "test"),
+    ("pnpm", "run", "build"),
+    ("yarn", "test"),
+    ("yarn", "build"),
+    ("cargo", "test"),
+    ("cargo", "check"),
+    ("go", "test"),
+    ("go", "build"),
+    ("dotnet", "test"),
+    ("dotnet", "build"),
+    ("mvn", "test"),
+    ("gradle", "test"),
     ("python", "-m", "unittest"),
     ("python", "-m", "compileall"),
     ("python", "main.py", "--help"),

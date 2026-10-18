@@ -10,10 +10,10 @@ from uuid import uuid4
 from tkinter import filedialog, messagebox, ttk
 
 from coding_rag.tools.bm25 import BM25Retriever, SearchResult
-from coding_rag.repository.chunks import split_python_files
+from coding_rag.repository.chunks import split_source_files
 from coding_rag.tools.recall import expand_with_neighbor_chunks
 from coding_rag.tools.env import ensure_dotenv, load_dotenv
-from coding_rag.repository.files import load_python_files
+from coding_rag.repository.files import load_source_files
 from coding_rag.agent.runtime import UnifiedRunConfig, run_unified_query
 from coding_rag.rag.llm_client import OpenAICompatibleChatClient, build_llm_config
 from coding_rag.rag.prompt import GenerationMode
@@ -176,14 +176,14 @@ class RepoPilotUI:
                 self._set_output(text)
                 self._set_status(run.status)
                 return
-            python_files = load_python_files(repo_path)
-            chunks = split_python_files(
-                python_files,
+            source_files = load_source_files(repo_path)
+            chunks = split_source_files(
+                source_files,
                 chunk_size=self.chunk_size_var.get(),
                 overlap=self.overlap_var.get(),
             )
             if not chunks:
-                self._set_output("No Python code chunks found. Check the repository path.")
+                self._set_output("No source code chunks found. Check the repository path.")
                 self._set_status("No code found")
                 return
 

@@ -1,4 +1,4 @@
-"""Process-wide, change-aware repository search index registry."""
+"""Change-aware search indexes for Python and other languages, sharing source caches."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from typing import Callable
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
-from coding_rag.repository.chunks import CodeChunk, split_python_files
-from coding_rag.repository.files import PythonFile, iter_python_paths, load_python_files
+from coding_rag.repository.chunks import CodeChunk, split_source_files
+from coding_rag.repository.files import SourceFile, iter_source_paths, load_source_files, read_source_text
 from coding_rag.repository.index import FileIndex, RepoIndex, SymbolRecord, normalize_path, rebuild_source
 from coding_rag.tools.bm25 import (
     DEFAULT_GRAPH_WEIGHT,
@@ -30,7 +30,7 @@ from coding_rag.tools.bm25 import (
 DEFAULT_INDEX_EXCLUDE_ROOTS = ("data", "datasets", "artifacts")
 RETRIEVER_VERSION = "hybrid-bm25-v7"
 CACHE_FORMAT = "repo-pilot-repository-index"
-CACHE_FORMAT_VERSION = 3
+CACHE_FORMAT_VERSION = 4
 BM25_STATE_SCHEMA_VERSION = 1
 MAX_CACHE_COMPRESSED_BYTES = 128 * 1024 * 1024
 MAX_CACHE_JSON_BYTES = 256 * 1024 * 1024
@@ -188,7 +188,7 @@ class RepositoryIndexRegistry:
         self._lock = RLock()
 
     def get(self, key: RepositoryIndexKey) -> RepositoryIndexAccess:
-        """Return a current index, rebuilding once when its Python manifest changed."""
+        """Return a current index, rebuilding once when its source manifest changed."""
         self._validate_cache_location(key)
         key_lock = self._key_lock(key)
         with key_lock:
@@ -362,10 +362,10 @@ class RepositoryIndexRegistry:
 
 
 def build_manifest(key: RepositoryIndexKey) -> tuple[ManifestEntry, ...]:
-    """Scan indexable Python files without reading their contents."""
+    """Scan indexable source candidates without reading their contents."""
     root = Path(key.repo_path)
     entries: list[ManifestEntry] = []
-    for path in iter_python_paths(root, exclude_roots=key.exclude_roots):
+    for path in iter_source_paths(root, exclude_roots=key.exclude_roots):
         try:
             stat = path.stat()
         except FileNotFoundError:
@@ -378,18 +378,20 @@ def build_repository_index(
     key: RepositoryIndexKey,
     manifest: tuple[ManifestEntry, ...],
 ) -> PreparedRepositoryIndex:
-    """Build a complete candidate snapshot without publishing partial state."""
-    files = load_python_files(key.repo_path, exclude_roots=key.exclude_roots)
-    chunks = split_python_files(files, chunk_size=key.chunk_size, overlap=key.overlap)
+    """Build a source snapshot; Python is optional, but no readable code raises ValueError."""
+    files = load_source_files(key.repo_path, exclude_roots=key.exclude_roots)
+    chunks = split_source_files(files, chunk_size=key.chunk_size, overlap=key.overlap)
     if not chunks:
-        raise ValueError("No Python code chunks found in repository")
+        raise ValueError("No source code chunks found in repository")
     retriever = BM25Retriever(
         chunks,
         graph_weight=key.graph_weight,
         path_weight=key.path_weight,
         path_root=Path(key.repo_path),
     )
-    return PreparedRepositoryIndex(key, manifest, tuple(chunks), retriever, len(files), len(chunks))
+    return PreparedRepositoryIndex(
+        key, manifest, tuple(chunks), retriever, len(retriever.repo_index.files), len(chunks)
+    )
 
 
 def build_incremental_repository_index(
@@ -432,9 +434,11 @@ def build_incremental_repository_index(
             continue
 
         path = root / Path(*entry.path.split("/"))
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        new_chunks = split_python_files(
-            [PythonFile(path=path, text=text)], chunk_size=key.chunk_size, overlap=key.overlap
+        text = read_source_text(path)
+        if text is None:
+            continue
+        new_chunks = split_source_files(
+            [SourceFile(path=path, text=text)], chunk_size=key.chunk_size, overlap=key.overlap
         )
         file_prepared = prepare_bm25_data(
             new_chunks, previous.retriever.tokenizer, path_root=root
@@ -447,7 +451,7 @@ def build_incremental_repository_index(
         rebuilt_chunk_count += len(new_chunks)
 
     if not chunks:
-        raise ValueError("No Python code chunks found in repository")
+        raise ValueError("No source code chunks found in repository")
     prepared = PreparedBM25Data(
         RepoIndex(repo_files), tuple(content_terms), tuple(metadata_terms), tuple(path_tokens)
     )
@@ -471,7 +475,7 @@ def build_incremental_repository_index(
         removed_chunks=removed_chunk_count,
     )
     return (
-        PreparedRepositoryIndex(key, manifest, tuple(chunks), retriever, len(manifest), len(chunks)),
+        PreparedRepositoryIndex(key, manifest, tuple(chunks), retriever, len(repo_files), len(chunks)),
         stats,
     )
 
@@ -614,7 +618,7 @@ def snapshot_from_envelope(envelope: object, key: RepositoryIndexKey) -> Prepare
         list(chunks), graph_weight=key.graph_weight, path_weight=key.path_weight,
         prepared_data=prepared, path_root=root,
     )
-    return PreparedRepositoryIndex(key, manifest, chunks, retriever, len(manifest), len(chunks))
+    return PreparedRepositoryIndex(key, manifest, chunks, retriever, len(retriever.repo_index.files), len(chunks))
 
 
 def safe_relative_path(value: object) -> str:
@@ -692,8 +696,8 @@ def parse_sources(
         if missing_blank_lines < 0:
             raise ValueError("cache source line count is invalid")
         restored_text = text + ("\n" * missing_blank_lines)
-        chunks.extend(split_python_files(
-            [PythonFile(path=path, text=restored_text)], chunk_size=chunk_size, overlap=overlap
+        chunks.extend(split_source_files(
+            [SourceFile(path=path, text=restored_text)], chunk_size=chunk_size, overlap=overlap
         ))
     if not chunks:
         raise ValueError("cache sources produced no chunks")

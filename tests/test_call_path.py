@@ -102,7 +102,7 @@ class CallPathToolTest(unittest.TestCase):
             (root / "target.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
             registry = RepositoryIndexRegistry(disk_cache=False)
             config = UnifiedRunConfig(repo_path=root, trace_db_path=None, max_steps=4)
-            with patch("coding_rag.tools.agent_readonly.load_python_files",
+            with patch("coding_rag.tools.agent_readonly.load_source_files",
                        side_effect=AssertionError("duplicate source load")):
                 with patch("coding_rag.tools.agent_readonly.build_repo_index",
                            side_effect=AssertionError("duplicate symbol index")):

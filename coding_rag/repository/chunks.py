@@ -1,12 +1,12 @@
 """
 代码分割模块
-负责将 Python 文件分割成固定大小的代码块，用于索引和检索
+负责将任意语言源码分割成固定大小的代码块，用于索引和检索
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from coding_rag.repository.files import PythonFile
+from coding_rag.repository.files import SourceFile
 
 
 @dataclass(frozen=True)
@@ -26,16 +26,16 @@ class CodeChunk:
     text: str
 
 
-def split_python_files(
-    python_files: list[PythonFile],
+def split_source_files(
+    source_files: list[SourceFile],
     chunk_size: int = 40,
     overlap: int = 5,
 ) -> list[CodeChunk]:
     """
-    将多个 Python 文件分割成基于行的代码块
+    将多个任意语言源码文件分割成基于行的代码块
     
     Args:
-        python_files: PythonFile 对象列表
+        source_files: SourceFile 对象列表
         chunk_size: 每个代码块的行数，默认为40
         overlap: 相邻代码块之间的重叠行数，默认为5
         
@@ -43,9 +43,16 @@ def split_python_files(
         CodeChunk 对象列表
     """
     chunks: list[CodeChunk] = []
-    for python_file in python_files:
-        chunks.extend(split_code_by_lines(python_file.path, python_file.text, chunk_size, overlap))
+    for source_file in source_files:
+        chunks.extend(split_code_by_lines(source_file.path, source_file.text, chunk_size, overlap))
     return chunks
+
+
+def split_python_files(
+    python_files: list[SourceFile], chunk_size: int = 40, overlap: int = 5,
+) -> list[CodeChunk]:
+    """Preserve the previous chunking API; chunking itself is language independent."""
+    return split_source_files(python_files, chunk_size, overlap)
 
 
 def split_code_by_lines(
@@ -55,7 +62,7 @@ def split_code_by_lines(
     overlap: int = 5,
 ) -> list[CodeChunk]:
     """
-    将单个 Python 文件分割成基于行的代码块
+    将单个源码文件分割成基于行的代码块
     
     使用滑动窗口方式分割，支持代码块之间的重叠
     
