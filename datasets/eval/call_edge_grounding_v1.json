@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "repo_id": "django",
+  "cases": [
+    {"id": "django-auth-decorator-login-redirect-generalization", "source_symbol": "user_passes_test.decorator._redirect_to_login", "target_symbol": "redirect_to_login"},
+    {"id": "django-json-timedelta-iso-generalization", "source_symbol": "DjangoJSONEncoder.default", "target_symbol": "duration_iso_string"},
+    {"id": "django-password-validator-import-generalization", "source_symbol": "get_password_validators", "target_symbol": "import_string"},
+    {"id": "django-reset-token-base36-generalization", "source_symbol": "PasswordResetTokenGenerator.check_token", "target_symbol": "base36_to_int"},
+    {"id": "django-append-slash-url-check-transfer", "source_symbol": "CommonMiddleware.should_redirect_with_slash", "target_symbol": "is_valid_path"},
+    {"id": "django-pbkdf2-hasher-crypto-transfer", "source_symbol": "PBKDF2PasswordHasher.encode", "target_symbol": "pbkdf2"},
+    {"id": "django-message-cookie-signer-transfer", "source_symbol": "CookieStorage.__init__", "target_symbol": "get_cookie_signer"},
+    {"id": "django-cache-expires-date-transfer", "source_symbol": "patch_response_headers", "target_symbol": "http_date"},
+    {"id": "django-csrf-random-secret-holdout-v2", "source_symbol": "_get_new_csrf_string", "target_symbol": "get_random_string"},
+    {"id": "django-signing-hmac-digest-holdout-v2", "source_symbol": "base64_hmac", "target_symbol": "salted_hmac"},
+    {"id": "django-storage-backend-import-holdout-v2", "source_symbol": "StorageHandler.create_storage", "target_symbol": "import_string"},
+    {"id": "django-static-last-modified-date-holdout-v2", "source_symbol": "serve", "target_symbol": "http_date"}
+  ]
+}

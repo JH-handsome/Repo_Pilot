@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "django-signed-session-cookie-load-holdout-v3", "source_path": "django/contrib/sessions/backends/signed_cookies.py", "source_symbol": "SessionStore.load"},
+    {"id": "django-filefield-upload-name-validation-holdout-v3", "source_path": "django/db/models/fields/files.py", "source_symbol": "FileField.generate_filename"},
+    {"id": "django-model-form-view-factory-holdout-v3", "source_path": "django/views/generic/edit.py", "source_symbol": "ModelFormMixin.get_form_class"},
+    {"id": "django-datetimefield-naive-timezone-holdout-v3", "source_path": "django/db/models/fields/__init__.py", "source_symbol": "DateTimeField.get_prep_value"},
+    {"id": "django-cookie-encoder-local-negative", "source_path": "django/contrib/messages/storage/cookie.py", "source_symbol": "MessageEncoder.default"},
+    {"id": "django-reset-hash-input-local-negative", "source_path": "django/contrib/auth/tokens.py", "source_symbol": "PasswordResetTokenGenerator._make_hash_value"},
+    {"id": "django-broken-link-ignore-local-negative", "source_path": "django/middleware/common.py", "source_symbol": "BrokenLinkEmailsMiddleware.is_ignorable_request"},
+    {"id": "django-vary-header-merge-local-negative", "source_path": "django/utils/cache.py", "source_symbol": "patch_vary_headers"}
+  ]
+}

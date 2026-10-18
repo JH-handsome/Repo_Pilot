@@ -1,0 +1,12 @@
+diff --git a/django/utils/termcolors.py b/django/utils/termcolors.py
+--- a/django/utils/termcolors.py
++++ b/django/utils/termcolors.py
+@@ -206,7 +206,8 @@ def parse_color_setting(config_string):
+             # The first instruction can contain a slash
+             # to break apart fg/bg.
+             colors = styles.pop().split("/")
++            colors.reverse()
+             fg = colors.pop()
+             if fg in color_names:
+                 definition["fg"] = fg
+             if colors and colors[-1] in color_names:

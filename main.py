@@ -24,7 +24,6 @@ def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for the unified LLM-directed workflow."""
     configure_utf8_stdio()
     provider_choices = available_provider_names() + ["custom"]
-    mode_choices = ["judge", "code-understand", "code-generate", "leetcode", "api"]
 
     parser = argparse.ArgumentParser(description="RepoPilot：由 LLM 自动决定回答或调用代码工具")
     parser.add_argument("repo_path", nargs="?", help="代码仓库路径；不填则进入交互模式")
@@ -48,12 +47,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trace-include-text", action="store_true", help="在检索 trace 中保留完整代码文本")
     parser.add_argument("--agent-policy", help="Agent executor 安全策略 JSON 路径")
     parser.add_argument("--rollback", metavar="SNAPSHOT_ID", help="恢复一次已批准写操作的修改前快照")
-    parser.add_argument(
-        "--mode",
-        choices=mode_choices,
-        default="judge",
-        help="回答风格：judge、code-understand、code-generate、leetcode 或 api",
-    )
     parser.add_argument(
         "--llm-provider",
         choices=provider_choices,
@@ -90,7 +83,7 @@ def run_single_turn(
     # 所有输入都从这里进入同一运行时，不再按 ASK/Agent 关键词分流。
     if args.show_tokens:
         print("查询分词结果:")
-        print(CodeTokenizer().tokenize(args.query))
+        print(CodeTokenizer().tokenize_query(args.query))
         print()
 
     try:
@@ -121,7 +114,7 @@ def run_single_turn(
         return 3
 
     if args.trace_out:
-        write_trace_json(args.trace_out, run.trace)
+        write_trace_json(args.trace_out, run.trace, trace_db=args.trace_db)
     print(render_unified_run(run))
     conversation = run.trace.get("conversation") or {}
     if conversation.get("status") == "failed":
@@ -220,7 +213,7 @@ def build_runtime_config(args: argparse.Namespace) -> UnifiedRunConfig:
         final_k=args.final_k,
         min_final_score=args.min_final_score,
         no_final_filter=args.no_final_filter,
-        generation_mode=GenerationMode(args.mode),
+        generation_mode=GenerationMode.JUDGE,
         max_context_chars=args.llm_context_chars,
         include_trace_text=args.trace_include_text,
         agent_policy_path=args.agent_policy,

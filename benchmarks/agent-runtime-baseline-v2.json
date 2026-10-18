@@ -1,0 +1,1069 @@
+{
+  "schema_version": 2,
+  "benchmark": "real_multirepo_agent_runtime_contract",
+  "created_at": "2026-09-23T05:38:01.572031+00:00",
+  "dataset": {
+    "name": "multirepo_source.jsonl",
+    "sha256": "1a5ddb6d4a7a8437010efe654703982ff3c86e92e22d8bf1bcbb911102a238d3",
+    "case_count": 20
+  },
+  "manifest": {
+    "name": "multirepo_manifest.json",
+    "sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e",
+    "schema_version": 1
+  },
+  "repositories": [
+    {
+      "id": "django",
+      "path": "data/repos/django",
+      "remote": "github.com/django/django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "id": "leetcode-python",
+      "path": "datasets/leetcode-python",
+      "remote": "github.com/cnkyrpsgl/leetcode",
+      "commit": "87fd47d0fba0e5f26f399dd3d9162eef430cc773",
+      "license": "MIT"
+    }
+  ],
+  "config": {
+    "top_k": 5,
+    "chunk_size": 40,
+    "overlap": 5,
+    "recall_window": 2,
+    "max_recall_results": null,
+    "min_final_score": 0.0,
+    "graph_weight": 0.0,
+    "path_weight": 0.25,
+    "exclude_roots": [
+      "data",
+      "datasets",
+      "artifacts"
+    ]
+  },
+  "retriever": "hybrid-bm25-v5",
+  "policy": {
+    "name": "deterministic_scripted_runtime",
+    "version": "search-first-result-read-cite-v1",
+    "uses_gold": false
+  },
+  "evaluation_mode": "runtime_retrieval_contract",
+  "corpus": {
+    "indexed_file_count": 4081,
+    "unique_gold_file_count": 21,
+    "negative_file_count": 4060,
+    "by_repo": {
+      "django": {
+        "indexed_file_count": 2918,
+        "unique_gold_file_count": 13,
+        "negative_file_count": 2905
+      },
+      "leetcode-python": {
+        "indexed_file_count": 1163,
+        "unique_gold_file_count": 8,
+        "negative_file_count": 1155
+      }
+    }
+  },
+  "contract_score": 84.58333333333333,
+  "metrics": {
+    "case_count": 20,
+    "search_hit_at_5": 1.0,
+    "search_mrr_at_5": 0.8166666666666667,
+    "selected_file_hit_at_1": 0.65,
+    "read_file_hit_at_1": 0.65,
+    "tool_sequence_success": 1.0,
+    "citation_validity": 1.0,
+    "gold_citation_grounding": 0.65,
+    "terminal_success": 1.0,
+    "memory_index_hit_rate": 1.0,
+    "steps_avg": 3.0,
+    "latency_ms_p50": 1327.333649999673,
+    "latency_ms_p95": 1544.3941700000328
+  },
+  "by_repo": {
+    "django": {
+      "case_count": 12,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.7916666666666666,
+      "selected_file_hit_at_1": 0.5833333333333334,
+      "read_file_hit_at_1": 0.5833333333333334,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.5833333333333334,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1412.732299999334,
+      "latency_ms_p95": 1806.87153000008
+    },
+    "leetcode-python": {
+      "case_count": 8,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.8541666666666666,
+      "selected_file_hit_at_1": 0.75,
+      "read_file_hit_at_1": 0.75,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.75,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 138.64490000014484,
+      "latency_ms_p95": 144.21357999990505
+    }
+  },
+  "by_task_type": {
+    "behavior": {
+      "case_count": 9,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.7037037037037037,
+      "selected_file_hit_at_1": 0.4444444444444444,
+      "read_file_hit_at_1": 0.4444444444444444,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.4444444444444444,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1237.2161000002961,
+      "latency_ms_p95": 1468.330779999451
+    },
+    "call_path": {
+      "case_count": 1,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1361.3363999993453,
+      "latency_ms_p95": 1361.3363999993453
+    },
+    "symbol": {
+      "case_count": 8,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 765.3538000004119,
+      "latency_ms_p95": 1906.7572449997892
+    },
+    "test_location": {
+      "case_count": 2,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.75,
+      "selected_file_hit_at_1": 0.5,
+      "read_file_hit_at_1": 0.5,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.5,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1488.953049999509,
+      "latency_ms_p95": 1509.3213549999746
+    }
+  },
+  "by_difficulty": {
+    "easy": {
+      "case_count": 5,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.9,
+      "selected_file_hit_at_1": 0.8,
+      "read_file_hit_at_1": 0.8,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.8,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1391.2469999995665,
+      "latency_ms_p95": 2018.6232399999426
+    },
+    "hard": {
+      "case_count": 4,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5833333333333334,
+      "selected_file_hit_at_1": 0.25,
+      "read_file_hit_at_1": 0.25,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.25,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 750.9829000000536,
+      "latency_ms_p95": 1415.966410000783
+    },
+    "medium": {
+      "case_count": 11,
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.8636363636363636,
+      "selected_file_hit_at_1": 0.7272727272727273,
+      "read_file_hit_at_1": 0.7272727272727273,
+      "tool_sequence_success": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.7272727272727273,
+      "terminal_success": 1.0,
+      "memory_index_hit_rate": 1.0,
+      "steps_avg": 3.0,
+      "latency_ms_p50": 1293.3309000000008,
+      "latency_ms_p95": 1504.19889999921
+    }
+  },
+  "warmups": [
+    {
+      "repo_id": "django",
+      "status": "miss",
+      "manifest_scan_ms": 419.70410000067204,
+      "index_build_ms": 0.0,
+      "file_count": 2918,
+      "chunk_count": 15846,
+      "changed_file_count": 0,
+      "lifecycle": "disk_hit",
+      "reused_file_count": 2918,
+      "rebuilt_file_count": 0,
+      "removed_file_count": 0,
+      "reused_chunk_count": 15846,
+      "rebuilt_chunk_count": 0,
+      "removed_chunk_count": 0,
+      "disk_read_ms": 6504.536899999948,
+      "disk_write_ms": 0.0,
+      "retriever_version": "hybrid-bm25-v5"
+    },
+    {
+      "repo_id": "leetcode-python",
+      "status": "miss",
+      "manifest_scan_ms": 83.63839999947231,
+      "index_build_ms": 0.0,
+      "file_count": 1163,
+      "chunk_count": 1202,
+      "changed_file_count": 0,
+      "lifecycle": "disk_hit",
+      "reused_file_count": 1163,
+      "rebuilt_file_count": 0,
+      "removed_file_count": 0,
+      "reused_chunk_count": 1202,
+      "rebuilt_chunk_count": 0,
+      "removed_chunk_count": 0,
+      "disk_read_ms": 615.4542999993282,
+      "disk_write_ms": 0.0,
+      "retriever_version": "hybrid-bm25-v5"
+    }
+  ],
+  "cases": [
+    {
+      "id": "django-url-validator",
+      "repo_id": "django",
+      "task_type": "symbol",
+      "difficulty": "easy",
+      "search_result_files": [
+        "django/core/validators.py",
+        "tests/forms_tests/tests/test_validators.py",
+        "tests/validators/tests.py",
+        "django/forms/fields.py",
+        "django/core/checks/async_checks.py"
+      ],
+      "selected_file": "django/core/validators.py",
+      "read_file": "django/core/validators.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 2167.7779000001465,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-model-backend",
+      "repo_id": "django",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "django/contrib/auth/models.py",
+        "django/contrib/auth/backends.py",
+        "tests/auth_tests/test_auth_backends.py",
+        "tests/auth_tests/models/custom_permissions.py",
+        "tests/auth_tests/models/custom_user.py"
+      ],
+      "selected_file": "django/contrib/auth/models.py",
+      "read_file": "django/contrib/auth/models.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1293.3309000000008,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-queryset",
+      "repo_id": "django",
+      "task_type": "symbol",
+      "difficulty": "easy",
+      "search_result_files": [
+        "django/db/models/query.py",
+        "django/db/backends/postgresql/operations.py",
+        "django/db/models/sql/query.py",
+        "django/db/backends/oracle/operations.py",
+        "django/db/backends/base/operations.py"
+      ],
+      "selected_file": "django/db/models/query.py",
+      "read_file": "django/db/models/query.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1391.2469999995665,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-migration-executor",
+      "repo_id": "django",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "django/db/migrations/executor.py",
+        "django/db/migrations/graph.py",
+        "django/db/migrations/loader.py",
+        "tests/migrations/test_executor.py",
+        "tests/migrations/test_loader.py"
+      ],
+      "selected_file": "django/db/migrations/executor.py",
+      "read_file": "django/db/migrations/executor.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1237.2161000002961,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-cache-base",
+      "repo_id": "django",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "django/core/cache/backends/redis.py",
+        "django/core/cache/backends/base.py",
+        "django/core/cache/backends/memcached.py",
+        "django/core/cache/backends/db.py",
+        "django/core/cache/backends/locmem.py"
+      ],
+      "selected_file": "django/core/cache/backends/redis.py",
+      "read_file": "django/core/cache/backends/redis.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1403.4256000013556,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-url-resolution",
+      "repo_id": "django",
+      "task_type": "call_path",
+      "difficulty": "hard",
+      "search_result_files": [
+        "tests/urlpatterns_reverse/tests.py",
+        "django/urls/resolvers.py",
+        "tests/resolve_url/tests.py",
+        "tests/i18n/patterns/tests.py",
+        "django/contrib/admin/helpers.py"
+      ],
+      "selected_file": "tests/urlpatterns_reverse/tests.py",
+      "read_file": "tests/urlpatterns_reverse/tests.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1361.3363999993453,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-lazy-settings",
+      "repo_id": "django",
+      "task_type": "symbol",
+      "difficulty": "easy",
+      "search_result_files": [
+        "django/conf/__init__.py",
+        "tests/settings_tests/tests.py",
+        "django/utils/module_loading.py",
+        "django/db/models/sql/query.py",
+        "django/conf/global_settings.py"
+      ],
+      "selected_file": "django/conf/__init__.py",
+      "read_file": "django/conf/__init__.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1422.004599999127,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-http-request",
+      "repo_id": "django",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "django/http/request.py",
+        "django/core/handlers/asgi.py",
+        "django/core/handlers/wsgi.py",
+        "django/core/files/uploadedfile.py",
+        "django/http/multipartparser.py"
+      ],
+      "selected_file": "django/http/request.py",
+      "read_file": "django/http/request.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1496.8132999983936,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-template-parser",
+      "repo_id": "django",
+      "task_type": "behavior",
+      "difficulty": "hard",
+      "search_result_files": [
+        "django/template/loader_tags.py",
+        "django/template/base.py",
+        "django/template/engine.py",
+        "django/template/defaulttags.py",
+        "django/template/library.py"
+      ],
+      "selected_file": "django/template/loader_tags.py",
+      "read_file": "django/template/loader_tags.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1425.6070000010368,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-atomic-transaction",
+      "repo_id": "django",
+      "task_type": "symbol",
+      "difficulty": "medium",
+      "search_result_files": [
+        "django/db/transaction.py",
+        "tests/transactions/tests.py",
+        "django/db/backends/base/base.py",
+        "django/db/migrations/state.py",
+        "django/db/models/sql/where.py"
+      ],
+      "selected_file": "django/db/transaction.py",
+      "read_file": "django/db/transaction.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1403.4599999995407,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-validator-tests",
+      "repo_id": "django",
+      "task_type": "test_location",
+      "difficulty": "medium",
+      "search_result_files": [
+        "tests/validators/tests.py",
+        "django/core/checks/urls.py",
+        "tests/forms_tests/tests/test_validators.py",
+        "tests/admin_views/urls.py",
+        "tests/check_framework/test_urls.py"
+      ],
+      "selected_file": "tests/validators/tests.py",
+      "read_file": "tests/validators/tests.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1466.3215999989916,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "django-auth-backend-tests",
+      "repo_id": "django",
+      "task_type": "test_location",
+      "difficulty": "medium",
+      "search_result_files": [
+        "tests/auth_tests/test_models.py",
+        "tests/auth_tests/test_auth_backends.py",
+        "tests/auth_tests/test_remote_user.py",
+        "tests/admin_views/custom_has_permission_admin.py",
+        "tests/auth_tests/test_forms.py"
+      ],
+      "selected_file": "tests/auth_tests/test_models.py",
+      "read_file": "tests/auth_tests/test_models.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 1511.5845000000263,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-two-sum",
+      "repo_id": "leetcode-python",
+      "task_type": "behavior",
+      "difficulty": "easy",
+      "search_result_files": [
+        "solutions/python3/167.py",
+        "solutions/python3/1.py",
+        "solutions/python3/1059.py",
+        "solutions/python3/1085.py",
+        "solutions/python3/1185.py"
+      ],
+      "selected_file": "solutions/python3/167.py",
+      "read_file": "solutions/python3/167.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.5,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 144.75579999998445,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-merge-k-lists",
+      "repo_id": "leetcode-python",
+      "task_type": "symbol",
+      "difficulty": "easy",
+      "search_result_files": [
+        "solutions/python3/23.py",
+        "solutions/python3/21.py",
+        "solutions/python3/378.py",
+        "solutions/python3/1198.py",
+        "solutions/python3/493.py"
+      ],
+      "selected_file": "solutions/python3/23.py",
+      "read_file": "solutions/python3/23.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 131.2140999998519,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-tree-level-order",
+      "repo_id": "leetcode-python",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "solutions/python3/102.py",
+        "solutions/python3/1161.py",
+        "solutions/python3/103.py",
+        "solutions/python3/107.py",
+        "solutions/python3/232.py"
+      ],
+      "selected_file": "solutions/python3/102.py",
+      "read_file": "solutions/python3/102.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 143.2065999997576,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-word-ladder",
+      "repo_id": "leetcode-python",
+      "task_type": "symbol",
+      "difficulty": "medium",
+      "search_result_files": [
+        "solutions/python3/127.py",
+        "solutions/python3/211.py",
+        "solutions/python3/58.py",
+        "solutions/python3/208.py",
+        "solutions/python3/676.py"
+      ],
+      "selected_file": "solutions/python3/127.py",
+      "read_file": "solutions/python3/127.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 139.46060000125726,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-lru-cache",
+      "repo_id": "leetcode-python",
+      "task_type": "behavior",
+      "difficulty": "medium",
+      "search_result_files": [
+        "solutions/python3/146.py",
+        "solutions/python3/1140.py",
+        "solutions/python3/211.py",
+        "solutions/python3/676.py",
+        "solutions/python3/460.py"
+      ],
+      "selected_file": "solutions/python3/146.py",
+      "read_file": "solutions/python3/146.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 137.1304999993299,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-course-schedule",
+      "repo_id": "leetcode-python",
+      "task_type": "symbol",
+      "difficulty": "medium",
+      "search_result_files": [
+        "solutions/python3/207.py",
+        "solutions/python3/1136.py",
+        "solutions/python3/1245.py",
+        "solutions/python3/954.py",
+        "solutions/python3/145.py"
+      ],
+      "selected_file": "solutions/python3/207.py",
+      "read_file": "solutions/python3/207.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 132.40070000028936,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-tree-codec",
+      "repo_id": "leetcode-python",
+      "task_type": "behavior",
+      "difficulty": "hard",
+      "search_result_files": [
+        "solutions/python/431.py",
+        "solutions/python/449.py",
+        "solutions/python3/297.py",
+        "solutions/python3/508.py",
+        "solutions/python3/208.py"
+      ],
+      "selected_file": "solutions/python/431.py",
+      "read_file": "solutions/python/431.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 0.3333333333333333,
+      "selected_file_hit_at_1": 0.0,
+      "read_file_hit_at_1": 0.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 0.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 140.62940000076196,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    },
+    {
+      "id": "leetcode-sliding-median",
+      "repo_id": "leetcode-python",
+      "task_type": "symbol",
+      "difficulty": "hard",
+      "search_result_files": [
+        "solutions/python3/480.py",
+        "solutions/python3/239.py",
+        "solutions/python3/339.py",
+        "solutions/python3/364.py",
+        "solutions/python3/587.py"
+      ],
+      "selected_file": "solutions/python3/480.py",
+      "read_file": "solutions/python3/480.py",
+      "search_hit_at_5": 1.0,
+      "search_mrr_at_5": 1.0,
+      "selected_file_hit_at_1": 1.0,
+      "read_file_hit_at_1": 1.0,
+      "tool_sequence_success": 1.0,
+      "citation_present": 1.0,
+      "citation_validity": 1.0,
+      "gold_citation_grounding": 1.0,
+      "terminal_success": 1.0,
+      "steps": 3,
+      "latency_ms": 137.82919999903243,
+      "index_lifecycle": "memory_hit",
+      "policy_input_fields": [
+        [
+          "query"
+        ],
+        [
+          "query",
+          "observation"
+        ],
+        [
+          "query",
+          "observation"
+        ]
+      ]
+    }
+  ]
+}

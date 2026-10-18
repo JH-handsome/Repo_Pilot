@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "benchmark": "pinned_python_call_path_component",
+  "dataset": {
+    "name": "call_path_tool_cases.json",
+    "sha256": "0464e0bd753ca2b2f325ea1a4e9b7a26f21b3b8856dd69ede94adb473282510e"
+  },
+  "manifest": {
+    "name": "multirepo_manifest.json",
+    "sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e"
+  },
+  "metrics": {
+    "case_count": 7,
+    "target_recall": 1.0,
+    "locator_rate": 1.0,
+    "complete_case_rate": 1.0,
+    "invalid_edge_count": 0
+  }
+}

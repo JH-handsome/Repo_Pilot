@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "django-render-to-loader",
+      "repo_id": "django",
+      "entry_path": "django/shortcuts.py",
+      "entry_symbol": "render",
+      "expected_targets": [{"path": "django/template/loader.py", "symbol": "render_to_string"}]
+    },
+    {
+      "id": "django-redirect-to-reverse",
+      "repo_id": "django",
+      "entry_path": "django/shortcuts.py",
+      "entry_symbol": "redirect",
+      "expected_targets": [{"path": "django/urls/base.py", "symbol": "reverse"}]
+    },
+    {
+      "id": "django-template-engine-handler",
+      "repo_id": "django",
+      "entry_path": "django/template/loader.py",
+      "entry_symbol": "get_template",
+      "expected_targets": [{"path": "django/template/utils.py", "symbol": "all"}]
+    },
+    {
+      "id": "django-login-view",
+      "repo_id": "django",
+      "entry_path": "django/contrib/auth/views.py",
+      "entry_symbol": "LoginView.form_valid",
+      "expected_targets": [{"path": "django/contrib/auth/__init__.py", "symbol": "login"}]
+    },
+    {
+      "id": "django-mail-message",
+      "repo_id": "django",
+      "entry_path": "django/core/mail/__init__.py",
+      "entry_symbol": "send_mail",
+      "expected_targets": [{"path": "django/core/mail/message.py", "symbol": "EmailMultiAlternatives"}]
+    },
+    {
+      "id": "django-fetch-cache",
+      "repo_id": "django",
+      "entry_path": "django/middleware/cache.py",
+      "entry_symbol": "FetchFromCacheMiddleware.process_request",
+      "expected_targets": [{"path": "django/utils/cache.py", "symbol": "get_cache_key"}]
+    },
+    {
+      "id": "django-static-response",
+      "repo_id": "django",
+      "entry_path": "django/views/static.py",
+      "entry_symbol": "serve",
+      "expected_targets": [{"path": "django/http/response.py", "symbol": "FileResponse"}]
+    }
+  ]
+}

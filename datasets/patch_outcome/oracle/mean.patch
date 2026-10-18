@@ -1,0 +1,9 @@
+diff --git a/stats_utils.py b/stats_utils.py
+--- a/stats_utils.py
++++ b/stats_utils.py
+@@ -3,4 +3,4 @@
+ 
+ def mean(values: list[float]) -> float:
+     """Return the arithmetic mean for a non-empty sequence."""
+-    return sum(values) // len(values)
++    return sum(values) / len(values)

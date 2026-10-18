@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "benchmark": "pinned_python_call_path_component",
+  "min_target_recall": 1.0,
+  "min_locator_rate": 1.0,
+  "min_complete_case_rate": 1.0,
+  "max_invalid_edge_count": 0
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "repo_id": "django",
+  "cases": [
+    {"id": "django-signed-session-cookie-load-holdout-v3", "source_symbol": "SessionStore.load", "target_symbol": "loads"},
+    {"id": "django-filefield-upload-name-validation-holdout-v3", "source_symbol": "FileField.generate_filename", "target_symbol": "validate_file_name"},
+    {"id": "django-model-form-view-factory-holdout-v3", "source_symbol": "ModelFormMixin.get_form_class", "target_symbol": "modelform_factory"},
+    {"id": "django-datetimefield-naive-timezone-holdout-v3", "source_symbol": "DateTimeField.get_prep_value", "target_symbol": "make_aware"}
+  ]
+}

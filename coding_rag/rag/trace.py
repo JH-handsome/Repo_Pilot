@@ -40,7 +40,7 @@ def build_retrieval_trace(
         "final_filter": serialize_results(final_results, include_text=include_text),
         "context_compaction": serialize_context_blocks(context_blocks, include_text=include_text),
     }
-    mode = str(params.get("workflow_mode") or "ask")
+    mode = str(params.get("workflow_mode") or "retrieval")
     run = build_trace_run(
         mode=mode,
         query=query,
@@ -139,7 +139,7 @@ def build_unified_retrieval_trace(
     params: dict[str, Any] | None,
     summary: dict[str, Any],
     stages: dict[str, list[dict[str, Any]]],
-    mode: str = "ask",
+    mode: str = "retrieval",
 ) -> dict[str, Any]:
     """Build a normalized trace around already-serialized retrieval stages."""
     params = params or {}
@@ -398,11 +398,12 @@ def render_trace_row(row: dict[str, Any], *, compact: bool = False) -> str:
     )
 
 
-def write_trace_json(path: str | Path, trace: dict[str, Any]) -> None:
-    """将 trace 字典写入 JSON 文件，自动创建父目录并确保 UTF-8 编码。"""
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8")
+def write_trace_json(path: str | Path, trace: dict[str, Any], *,
+                     trace_db: str | Path | None = None) -> None:
+    """将 trace 写入 UTF-8 JSON，并向配置的 SQLite 归档脱敏副本。"""
+    from coding_rag.storage.artifacts import write_json_artifact
+
+    write_json_artifact(path, trace, trace_db=trace_db)
 
 
 def preview_text(text: str, max_chars: int = 120) -> str:

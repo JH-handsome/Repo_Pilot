@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "benchmark": "natural_language_source_discovery_diagnostic",
+  "evaluation_mode": "offline_retrieval_only_no_oracle_in_search",
+  "command": "python scripts/source_discovery_eval.py --out <scorecard.json>",
+  "repo_commits": {
+    "aider": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+    "django": "09fdc06346b167ff6231a4cb80b85ae67b53c715"
+  },
+  "top_k": 20,
+  "case_count": 20,
+  "source_file_at_5": 0.95,
+  "source_file_at_20": 1.0,
+  "source_function_span_at_5": 0.7,
+  "source_function_span_at_20": 0.75,
+  "source_definition_at_5": 0.6,
+  "source_definition_at_20": 0.6,
+  "by_repo": {
+    "aider": {"cases": 12, "source_file_at_5": 0.9166666666666666, "source_definition_at_5": 0.4166666666666667},
+    "django": {"cases": 8, "source_file_at_5": 1.0, "source_definition_at_5": 0.875}
+  },
+  "limitations": "All 20 authored cases are revealed. Definition visibility is not correct source selection, answer quality, or model repair capability. The span-overlap score can be optimistic for long functions."
+}

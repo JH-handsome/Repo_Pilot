@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "evaluation_mode": "offline_opt_in_component_smoke_not_model_behavior",
+  "repository": {
+    "id": "aider",
+    "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c"
+  },
+  "command_pattern": "python scripts/repo_inspect.py data/repos/aider trace <source_path> <source_symbol> --assigned-instance",
+  "source_checked_cases": [
+    {
+      "source_path": "aider/commands.py",
+      "source_symbol": "Commands.cmd_web",
+      "call": "self.scraper.scrape",
+      "target_path": "aider/scrape.py",
+      "target_symbol": "Scraper.scrape"
+    },
+    {
+      "source_path": "aider/commands.py",
+      "source_symbol": "Commands.cmd_help",
+      "call": "self.help.ask",
+      "target_path": "aider/help.py",
+      "target_symbol": "Help.ask"
+    },
+    {
+      "source_path": "aider/gui.py",
+      "source_symbol": "GUI.do_web",
+      "call": "self.scraper.scrape",
+      "target_path": "aider/scrape.py",
+      "target_symbol": "Scraper.scrape"
+    }
+  ],
+  "observed": {
+    "source_checked_cases_with_target_candidate": 3,
+    "source_checked_case_count": 3,
+    "previously_existing_aider_anchor_cases_with_any_candidate": 0,
+    "previously_existing_aider_anchor_case_count": 12,
+    "previously_existing_django_anchor_cases_with_any_candidate": 0,
+    "previously_existing_django_anchor_case_count": 8
+  },
+  "control_inputs": [
+    {
+      "path": "datasets/eval/aider_call_edge_source_anchors_v1.json",
+      "sha256": "6f7cda04fd6d49c07a32650ddde55c20d1277e99841a56dca6ce78fe1eaad459"
+    },
+    {
+      "path": "datasets/eval/django_call_edge_source_anchors_v1.json",
+      "sha256": "84505d450a3f259d25e7cecf866c63080e1fffa8a223936aa1a62ff6dbe5a45b9"
+    }
+  ],
+  "limitations": "The three positives were chosen after the feature design and are not blind. The 20 older anchors were designed for other call-edge tasks; zero emitted candidates is not a false-positive-rate estimate. This candidate only names a same-function imported constructor and method definition, not the runtime object's identity or a verified direct edge. Default Agent retrieval and answers are unchanged."
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "component": "file-local-symbol-v1",
+  "evaluation_mode": "oracle_source_file_component_not_auto_file_selection",
+  "command": "python scripts/source_discovery_eval.py --out <scorecard.json>",
+  "datasets": "Aider 4 cross-file positive + 4 local negative + 4 same-file negative; Django 4 cross-file positive + 4 local negative",
+  "repo_commits": {
+    "aider": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+    "django": "09fdc06346b167ff6231a4cb80b85ae67b53c715"
+  },
+  "case_count": 20,
+  "source_file_at_5": 0.95,
+  "definition_chunk_at_5": 0.6,
+  "file_local_symbol_at_1": 0.75,
+  "file_local_symbol_at_3": 0.95,
+  "file_local_symbol_at_5": 1.0,
+  "two_stage_reachable_at_5_files_3_symbols": 0.9,
+  "by_repo": {
+    "aider": {"cases": 12, "file_local_symbol_at_1": 0.8333333333333334, "file_local_symbol_at_3": 0.9166666666666666},
+    "django": {"cases": 8, "file_local_symbol_at_1": 0.625, "file_local_symbol_at_3": 1.0}
+  },
+  "limitations": "All cases were revealed before implementation. The locator is evaluated with the audited correct file; it does not choose that file or prove that the top symbol answers the question. Two-stage reachability is an upper bound, not measured automatic end-to-end success."
+}

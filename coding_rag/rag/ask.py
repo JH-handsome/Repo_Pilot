@@ -1,22 +1,26 @@
-"""ASK 模式检索流水线：检索、召回、过滤和 prompt 组装。"""
+"""统一 Agent 复用的代码检索流水线。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from coding_rag.repository.chunks import split_python_files
-from coding_rag.repository.files import load_python_files
-from coding_rag.tools.bm25 import BM25Retriever, SearchResult
+from coding_rag.repository.search_index import (
+    DEFAULT_INDEX_EXCLUDE_ROOTS,
+    GLOBAL_REPOSITORY_INDEX_REGISTRY,
+    RepositoryIndexKey,
+    RepositoryIndexRegistry,
+)
+from coding_rag.tools.bm25 import DEFAULT_GRAPH_WEIGHT, DEFAULT_PATH_WEIGHT, SearchResult
 from coding_rag.tools.filter import filter_recalled_results
 from coding_rag.tools.recall import expand_with_neighbor_chunks
-from coding_rag.rag.prompt import GenerationMode, build_user_prompt, get_system_prompt
+from coding_rag.rag.prompt import GenerationMode
 from coding_rag.rag.trace import build_retrieval_trace
 
 
 @dataclass(frozen=True)
-class AskModeConfig:
-    """ASK 模式检索配置。
+class RetrievalConfig:
+    """统一 Agent 的代码检索配置。
 
     控制代码检索流水线的各项参数，包括 chunk 切分、BM25 初检、
     邻居召回、最终过滤和 generation mode 选择。
@@ -35,38 +39,25 @@ class AskModeConfig:
     generation_mode: GenerationMode = GenerationMode.JUDGE
     max_context_chars: int = 12000
     include_trace_text: bool = False
+    graph_weight: float = DEFAULT_GRAPH_WEIGHT
+    path_weight: float = DEFAULT_PATH_WEIGHT
+    exclude_roots: tuple[str, ...] = DEFAULT_INDEX_EXCLUDE_ROOTS
 
 
-@dataclass(frozen=True)
-class AskModeRun:
-    """ASK 模式单次检索运行的完整结果。
-
-    记录从查询输入到最终回答的全链路数据，包括初检结果、
-    召回结果、最终过滤结果、trace 信息以及组装后的消息和回答。
-    """
-
-    query: str
-    plan: "TaskPlan"
-    seed_results: list[SearchResult]
-    recalled_results: list[SearchResult]
-    final_results: list[SearchResult]
-    trace: dict
-    messages: list[dict[str, str]]
-    answer: str | None
-
-
-def retrieve_for_ask(
+def retrieve_code(
     query: str,
-    config: AskModeConfig,
+    config: RetrievalConfig,
+    *,
+    index_registry: RepositoryIndexRegistry | None = None,
 ) -> tuple[list[SearchResult], list[SearchResult], list[SearchResult], dict]:
-    """执行 ASK 模式检索流水线。
+    """执行代码检索流水线。
 
     依次完成文件加载、chunk 切分、BM25 初检、邻居召回和最终过滤，
     返回 seed_results、recalled_results、final_results 及 trace 字典。
 
     Args:
         query: 用户查询字符串。
-        config: ASK 检索配置。
+        config: 检索配置。
 
     Returns:
         四元组 (seed_results, recalled_results, final_results, trace)：
@@ -78,16 +69,19 @@ def retrieve_for_ask(
     Raises:
         ValueError: 未找到 Python 代码块。
     """
-    # ASK 检索的阅读顺序：文件加载 -> 切 chunk -> 初检索 -> 邻居召回 -> 最终过滤 -> trace。
-    python_files = load_python_files(config.repo_path)
-    chunks = split_python_files(python_files, chunk_size=config.chunk_size, overlap=config.overlap)
-    if not chunks:
-        raise ValueError("未找到 Python 代码块，请检查 repo_path 和文件内容")
-
-    # seed_results 是 BM25/结构化检索的第一批候选，后续召回和过滤都围绕它展开。
-    retriever = BM25Retriever(chunks)
+    registry = index_registry or GLOBAL_REPOSITORY_INDEX_REGISTRY
+    access = registry.get(RepositoryIndexKey.create(
+        config.repo_path,
+        chunk_size=config.chunk_size,
+        overlap=config.overlap,
+        graph_weight=config.graph_weight,
+        path_weight=config.path_weight,
+        exclude_roots=config.exclude_roots,
+    ))
+    chunks = list(access.index.chunks)
+    retriever = access.index.retriever
     candidate_k = config.candidate_k or config.top_k
-    seed_results = retriever.search(query, top_k=candidate_k)
+    seed_results, scores = retriever.search_with_scores(query, top_k=candidate_k)
     max_recall_results = resolve_max_recall_results(
         candidate_k=candidate_k,
         recall_window=config.recall_window,
@@ -109,6 +103,7 @@ def retrieve_for_ask(
             retriever=retriever,
             final_k=None if final_k == 0 else final_k,
             min_score=config.min_final_score,
+            scores=scores,
         )
 
     # trace 同时保留旧 stages 和新 events，方便前端、评测脚本和调试报告逐步迁移。
@@ -128,10 +123,34 @@ def retrieve_for_ask(
             "final_k": config.final_k if config.final_k is not None else config.top_k,
             "min_final_score": config.min_final_score,
             "no_final_filter": config.no_final_filter,
-            "workflow_mode": "ask",
+            "workflow_mode": "retrieval",
+            "retriever_version": access.index.key.retriever_version,
+            "graph_weight": config.graph_weight,
+            "path_weight": config.path_weight,
+            "exclude_roots": list(config.exclude_roots),
         },
         include_text=config.include_trace_text,
     )
+    index_metadata = access.trace_metadata()
+    trace["artifacts"]["index"] = index_metadata
+    trace["summary"].update({
+        "index_status": index_metadata["status"],
+        "index_lifecycle": index_metadata["lifecycle"],
+        "index_build_ms": index_metadata["index_build_ms"],
+        "index_disk_read_ms": index_metadata["disk_read_ms"],
+        "index_disk_write_ms": index_metadata["disk_write_ms"],
+        "index_disk_write_status": index_metadata["disk_write_status"],
+        "manifest_scan_ms": index_metadata["manifest_scan_ms"],
+        "indexed_file_count": index_metadata["file_count"],
+        "indexed_chunk_count": index_metadata["chunk_count"],
+        "changed_file_count": index_metadata["changed_file_count"],
+        "reused_file_count": index_metadata["reused_file_count"],
+        "rebuilt_file_count": index_metadata["rebuilt_file_count"],
+        "removed_file_count": index_metadata["removed_file_count"],
+        "reused_chunk_count": index_metadata["reused_chunk_count"],
+        "rebuilt_chunk_count": index_metadata["rebuilt_chunk_count"],
+        "removed_chunk_count": index_metadata["removed_chunk_count"],
+    })
     return seed_results, recalled_results, final_results, trace
 
 
@@ -160,25 +179,6 @@ def resolve_max_recall_results(
     return max_recall_results
 
 
-def build_ask_messages(
-    query: str,
-    context: str,
-    generation_mode: GenerationMode = GenerationMode.JUDGE,
-) -> list[dict[str, str]]:
-    """组装 ASK 模式的 LLM 对话消息。
-
-    根据 generation mode 构建 system prompt 和 user prompt，
-    返回标准的 messages 列表供 LLM 调用。
-
-    Args:
-        query: 用户查询字符串。
-        context: 检索到的代码上下文文本。
-        generation_mode: 生成模式，默认为 JUDGE。
-
-    Returns:
-        messages 列表，包含 system 和 user 两个角色消息。
-    """
-    return [
-        {"role": "system", "content": get_system_prompt(generation_mode)},
-        {"role": "user", "content": build_user_prompt(generation_mode, query, context)},
-    ]
+# 旧检索 API 的兼容别名；不再代表一个可选的 ASK 工作流。
+AskModeConfig = RetrievalConfig
+retrieve_for_ask = retrieve_code

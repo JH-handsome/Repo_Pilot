@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "benchmark": "explicit_call_path_runtime_contract",
+  "datasets": [
+    {
+      "name": "multirepo_call_path_holdout.jsonl",
+      "sha256": "ca750f1e8855ea4cb684d6350334abd1719d47cfbd5c18f152933c3a7531d02d"
+    },
+    {
+      "name": "multirepo_call_path_transfer.jsonl",
+      "sha256": "c1d49c3abe51cb086e2d5433d80d5b162d1a24674e318f710e035216d784a77a"
+    }
+  ],
+  "manifest": {
+    "name": "multirepo_manifest.json",
+    "sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e"
+  },
+  "repositories": [
+    {
+      "id": "django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "remote": "github.com/django/django"
+    },
+    {
+      "id": "leetcode-python",
+      "commit": "87fd47d0fba0e5f26f399dd3d9162eef430cc773",
+      "remote": "github.com/cnkyrpsgl/leetcode"
+    }
+  ],
+  "config": {
+    "top_k": 5,
+    "chunk_size": 40,
+    "overlap": 5,
+    "recall_window": 2,
+    "max_recall_results": null,
+    "min_final_score": 0.0,
+    "graph_weight": 0.0,
+    "path_weight": 0.25,
+    "exclude_roots": ["data", "datasets", "artifacts"]
+  },
+  "retriever": "hybrid-bm25-v6",
+  "policy": "first-query-callable-search-definition-unique-edge-read-both-v3",
+  "evaluation_mode": "offline_scripted_runtime_not_model_capability",
+  "metrics": {
+    "case_count": 8,
+    "contract_success_rate": 1.0,
+    "all_gold_read_rate": 1.0,
+    "source_call_observed_rate": 1.0,
+    "target_definition_observed_rate": 1.0,
+    "all_gold_cited_rate": 1.0,
+    "citation_valid_rate": 1.0,
+    "terminal_success_rate": 1.0
+  }
+}

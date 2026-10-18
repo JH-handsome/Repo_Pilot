@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "benchmark": "pinned_call_path_link_and_abstain_challenge",
+  "dataset": {
+    "name": "call_path_challenge_v1.json",
+    "sha256": "f135a819e55dbb77c7fdf4e2643a3fea1d35b00122dbf8c11f8cecce570cdad0"
+  },
+  "manifest": {
+    "name": "multirepo_manifest.json",
+    "sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e"
+  },
+  "repositories": [
+    {
+      "id": "django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "remote": "github.com/django/django"
+    },
+    {
+      "id": "leetcode-python",
+      "commit": "87fd47d0fba0e5f26f399dd3d9162eef430cc773",
+      "remote": "github.com/cnkyrpsgl/leetcode"
+    }
+  ],
+  "config": {
+    "top_k": 5,
+    "chunk_size": 40,
+    "overlap": 5,
+    "recall_window": 2,
+    "max_recall_results": null,
+    "min_final_score": 0.0,
+    "graph_weight": 0.0,
+    "path_weight": 0.25,
+    "exclude_roots": ["data", "datasets", "artifacts"]
+  },
+  "retriever": "hybrid-bm25-v6",
+  "policy": "first-query-callable-search-definition-unique-edge-read-both-v3",
+  "evaluation_mode": "offline_scripted_runtime_not_model_capability",
+  "metrics": {
+    "case_count": 9,
+    "positive_count": 4,
+    "negative_count": 5,
+    "positive_link_rate": 1.0,
+    "negative_abstain_rate": 1.0,
+    "false_link_count": 0
+  }
+}

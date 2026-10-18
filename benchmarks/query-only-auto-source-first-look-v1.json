@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "benchmark": "query_only_auto_source_diagnostic",
+  "status": "revealed_development_sets_not_blind",
+  "candidate_version": "call-edge-candidates-v1",
+  "auto_source_version": "query-only-auto-source-v1",
+  "config": {
+    "source_file_limit": 5,
+    "symbols_per_file": 1,
+    "line_weight": 1,
+    "default_agent_unchanged": true
+  },
+  "repositories": {
+    "aider": {
+      "repository_identity": {
+        "status": "pinned_validated",
+        "manifest_sha256": "cf46b5d4ec58cd9b259fc5282b46de7ee1d74b73f55f2e4339040dcba40d1363",
+        "repo_id": "aider",
+        "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c"
+      },
+      "repository_fingerprint": "2abb959a5c51d4b8520071e27016bb3b7b888ff31d42f4948d8af8a209ec0ef5",
+      "positive": {
+        "datasets": [
+          {
+            "name": "aider_call_edge_positive_v1.jsonl",
+            "sha256": "49c5d8abf9386dd24113b28bca7ae159328efdb859c9387a2d078a3bcdb01a22"
+          }
+        ],
+        "grounding_sha256": "e9e21d733c8d02eb22f99aa49f32b2f433ec8f9f88af86f5abe60779e4a615b6",
+        "case_count": 4,
+        "exact_edge_at_1": 3,
+        "exact_edge_at_3": 3,
+        "source_file_match": 3,
+        "baseline_all_gold_at_5": 3,
+        "missing_target_at_1": 0,
+        "cases": [
+          {
+            "id": "aider-map-important-files",
+            "source_candidate": "aider/repomap.py",
+            "source_symbol": "RepoMap.get_ranked_tags_map_uncached",
+            "source_search_rank": 1,
+            "exact_edge_rank": 1,
+            "candidate_count": 2
+          },
+          {
+            "id": "aider-linter-command-execution",
+            "source_candidate": "aider/linter.py",
+            "source_symbol": "Linter.run_cmd",
+            "source_search_rank": 1,
+            "exact_edge_rank": 1,
+            "candidate_count": 1
+          },
+          {
+            "id": "aider-main-parser-creation",
+            "source_candidate": "aider/args.py",
+            "source_symbol": "main",
+            "source_search_rank": 1,
+            "exact_edge_rank": null,
+            "candidate_count": 0
+          },
+          {
+            "id": "aider-coder-reasoning-strip",
+            "source_candidate": "aider/coders/base_coder.py",
+            "source_symbol": "Coder.remove_reasoning_content",
+            "source_search_rank": 2,
+            "exact_edge_rank": 1,
+            "candidate_count": 1
+          }
+        ]
+      },
+      "negative": {
+        "datasets": [
+          {
+            "name": "aider_call_edge_negative_v1.jsonl",
+            "sha256": "119ed26a94836c816739b96c2975055aab4838fb77f0dfecfb51a4e0e17c4f7b"
+          },
+          {
+            "name": "aider_call_edge_near_negative_v1.jsonl",
+            "sha256": "bd617d1a157b62a628808a3a7c233bce2ef1e405476329d74e339f9687db76a2"
+          }
+        ],
+        "case_count": 8,
+        "auto_suggestions": 0,
+        "auto_abstentions": 8,
+        "unanchored_suggestions": 8
+      }
+    },
+    "django": {
+      "repository_identity": {
+        "status": "pinned_validated",
+        "manifest_sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e",
+        "repo_id": "django",
+        "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715"
+      },
+      "repository_fingerprint": "d94dd9fe1bc5be1e353c86d5a37696641d82edb2e678eb70a60118a71bbf28a5",
+      "positive": {
+        "datasets": [
+          {
+            "name": "multirepo_call_path_generalization_v1.jsonl",
+            "sha256": "337567597489599cd620a1cca32e748529cf8be6cfe6bc96596741898873f5d7"
+          }
+        ],
+        "grounding_sha256": "4b2fb9d181b45a524e01ede415437e40e71ea053b008ee0c2bf1ed45eb11d8fd",
+        "case_filter": [
+          "django-auth-decorator-login-redirect-generalization",
+          "django-json-timedelta-iso-generalization",
+          "django-password-validator-import-generalization",
+          "django-reset-token-base36-generalization"
+        ],
+        "case_count": 4,
+        "exact_edge_at_1": 2,
+        "exact_edge_at_3": 2,
+        "source_file_match": 3,
+        "baseline_all_gold_at_5": 2,
+        "missing_target_at_1": 2,
+        "cases": [
+          {
+            "id": "django-auth-decorator-login-redirect-generalization",
+            "source_candidate": "django/contrib/admin/views/decorators.py",
+            "source_symbol": "staff_member_required",
+            "source_search_rank": 1,
+            "exact_edge_rank": null,
+            "candidate_count": 1
+          },
+          {
+            "id": "django-json-timedelta-iso-generalization",
+            "source_candidate": "django/core/serializers/json.py",
+            "source_symbol": "DjangoJSONEncoder.default",
+            "source_search_rank": 1,
+            "exact_edge_rank": 1,
+            "candidate_count": 2
+          },
+          {
+            "id": "django-password-validator-import-generalization",
+            "source_candidate": "django/contrib/auth/password_validation.py",
+            "source_symbol": "get_password_validators",
+            "source_search_rank": 1,
+            "exact_edge_rank": 1,
+            "candidate_count": 2
+          },
+          {
+            "id": "django-reset-token-base36-generalization",
+            "source_candidate": "django/contrib/auth/tokens.py",
+            "source_symbol": "PasswordResetTokenGenerator._make_token_with_timestamp",
+            "source_search_rank": 1,
+            "exact_edge_rank": null,
+            "candidate_count": 2
+          }
+        ]
+      },
+      "negative": {
+        "datasets": [
+          {
+            "name": "multirepo_call_edge_negative_v1.jsonl",
+            "sha256": "b26f368ccdc42dfb30d189181551f324bfc755f0c53c79f1655474da57ee7263"
+          }
+        ],
+        "case_count": 4,
+        "auto_suggestions": 0,
+        "auto_abstentions": 4,
+        "unanchored_suggestions": 4
+      }
+    }
+  },
+  "aggregate": {
+    "positive_exact_edge_at_1": 5,
+    "positive_cases": 8,
+    "negative_auto_abstentions": 12,
+    "negative_cases": 12,
+    "negative_unanchored_suggestions": 12
+  },
+  "limitations": [
+    "Gold source/target annotations are used only for post-hoc scoring.",
+    "The selected source is an unverified retrieval candidate; edge results must be checked by reading both source locations.",
+    "All cases were previously inspected during development; scores are not independent generalization or model-answer evidence.",
+    "Aider parser creation has its true source outside search Top-5; dynamic calls may remain unresolved."
+  ]
+}

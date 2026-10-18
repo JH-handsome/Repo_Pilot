@@ -8,6 +8,36 @@ from coding_rag.tools.filter import filter_recalled_results
 
 
 class ResultFilterTest(unittest.TestCase):
+    def test_search_scores_are_reused_by_final_filter(self):
+        class CountingRetriever(BM25Retriever):
+            def __init__(self, chunks):
+                super().__init__(chunks)
+                self.score_calls = 0
+
+            def hybrid_scores(self, query):
+                self.score_calls += 1
+                return super().hybrid_scores(query)
+
+        chunks = [
+            CodeChunk(Path("a.py"), 1, 5, "def target(): return helper()"),
+            CodeChunk(Path("a.py"), 6, 10, "def helper(): return 1"),
+            CodeChunk(Path("b.py"), 1, 5, "def other(): return 2"),
+        ]
+        retriever = CountingRetriever(chunks)
+        seeds, scores = retriever.search_with_scores("target helper", top_k=1)
+        recalled = expand_with_neighbor_chunks(chunks, seeds, window=1)
+
+        reused = filter_recalled_results(
+            "target helper", recalled, retriever, final_k=2, scores=scores
+        )
+        self.assertEqual(retriever.score_calls, 1)
+
+        recomputed = filter_recalled_results(
+            "target helper", recalled, retriever, final_k=2
+        )
+        self.assertEqual(retriever.score_calls, 2)
+        self.assertEqual(reused, recomputed)
+
     def test_filter_recalled_results_keeps_best_query_match(self):
         chunks = [
             CodeChunk(Path("a.py"), 1, 10, "helper setup"),
@@ -51,6 +81,27 @@ class ResultFilterTest(unittest.TestCase):
 
         self.assertEqual(len(results), 3)
         self.assertEqual(results[0].chunk, chunks[1])
+
+    def test_finite_results_prefer_distinct_files_before_extra_chunks(self):
+        chunks = [
+            CodeChunk(Path("dominant.py"), 1, 10, "target target target"),
+            CodeChunk(Path("dominant.py"), 11, 20, "target target"),
+            CodeChunk(Path("alternative.py"), 1, 10, "target"),
+        ]
+        retriever = BM25Retriever(chunks)
+        recalled = [SearchResult(chunk, 1.0, source="bm25") for chunk in chunks]
+
+        results = filter_recalled_results(
+            query="target",
+            recalled_results=recalled,
+            retriever=retriever,
+            final_k=2,
+        )
+
+        self.assertEqual(
+            [result.chunk.file_path for result in results],
+            [Path("dominant.py"), Path("alternative.py")],
+        )
 
 
 if __name__ == "__main__":

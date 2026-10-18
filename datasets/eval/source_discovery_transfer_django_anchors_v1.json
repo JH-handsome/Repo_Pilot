@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "transfer-django-url-validator", "source_path": "django/core/validators.py", "source_symbol": "URLValidator.__call__"},
+    {"id": "transfer-django-model-backend", "source_path": "django/contrib/auth/backends.py", "source_symbol": "ModelBackend.authenticate"}
+  ]
+}

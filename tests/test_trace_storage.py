@@ -102,13 +102,54 @@ class SQLiteTraceStoreTest(unittest.TestCase):
     def test_schema_version_is_separate_and_future_schema_is_rejected(self):
         self.store.save_trace(snapshot(), CONTEXT)
         with closing(sqlite3.connect(self.path)) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
-            db.execute("PRAGMA user_version=2")
+            db.execute("PRAGMA user_version=4")
         with self.assertRaises(ValueError):
             self.store.save_trace(snapshot(), CONTEXT)
         with closing(sqlite3.connect(self.path)) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 4)
+
+    def test_v1_schema_is_migrated_without_losing_existing_runs(self):
+        legacy = snapshot()
+        encoded = json.dumps(legacy, ensure_ascii=False)
+        run = legacy["run"]
+        with closing(sqlite3.connect(self.path)) as db:
+            db.execute("""CREATE TABLE trace_runs (
+                run_id TEXT PRIMARY KEY, session_id TEXT, source TEXT NOT NULL,
+                repo_key TEXT NOT NULL, mode TEXT NOT NULL, status TEXT NOT NULL,
+                query TEXT, started_at TEXT, updated_at TEXT NOT NULL, finished_at TEXT,
+                trace_version TEXT NOT NULL, revision INTEGER NOT NULL CHECK (revision > 0),
+                trace_json TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE trace_events (
+                run_id TEXT NOT NULL REFERENCES trace_runs(run_id), seq INTEGER NOT NULL,
+                step TEXT NOT NULL, status TEXT NOT NULL, duration_ms INTEGER,
+                occurred_at TEXT, error_type TEXT, summary_json TEXT NOT NULL,
+                PRIMARY KEY (run_id, seq))""")
+            db.execute("PRAGMA user_version=1")
+            db.execute(
+                "INSERT INTO trace_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run["run_id"], None, "test", "test-repository", run["mode"],
+                 run["status"], run["query"], run["started_at"], run["updated_at"],
+                 run["finished_at"], "1.0", 1, encoded),
+            )
+            db.execute(
+                "INSERT INTO trace_events VALUES (?,?,?,?,?,?,?,?)",
+                (run["run_id"], 1, "model_decision", "success", None, None, None, "{}"),
+            )
+            db.commit()
+        self.assertEqual(self.store.get_trace(run["run_id"]), legacy)
+        self.assertEqual(len(self.store.list_traces()["items"]), 1)
+        self.assertEqual(self.store.get_llm_calls(run["run_id"]), [])
+        self.assertEqual(self.store.get_llm_summary(run["run_id"])["call_count"], 0)
+        updated = copy.deepcopy(legacy)
+        updated["run"]["revision"] = 2
+        updated["events"].append(build_trace_event(step="final_answer"))
+        self.assertTrue(self.store.save_trace(updated, CONTEXT))
+        self.assertEqual(self.store.get_trace(run["run_id"]), updated)
+        self.assertEqual(self.store.get_llm_calls(run["run_id"]), [])
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 3)
 
     def test_conflicting_revision_and_unrelated_database_are_rejected(self):
         trace = snapshot()
@@ -125,6 +166,33 @@ class SQLiteTraceStoreTest(unittest.TestCase):
         with closing(sqlite3.connect(unrelated)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 0)
             self.assertEqual(db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [("user_data",)])
+
+    def test_llm_call_storage_rejects_wrong_event_and_unbounded_or_extra_fields(self):
+        observation = {
+            "schema_version": 1, "operation": "chat.completions",
+            "provider": "test", "model": "model", "attempts": 1,
+            "latency_ms": 1.0, "outcome": "success", "error_class": None,
+        }
+        wrong_event = snapshot(events=[build_trace_event(
+            step="search_code", artifacts={"llm_call": observation},
+        )])
+        with self.assertRaises(ValueError):
+            self.store.save_trace(wrong_event, CONTEXT)
+        extra_field = copy.deepcopy(observation)
+        extra_field["prompt"] = "secret"
+        malformed = snapshot(events=[build_trace_event(
+            step="model_decision", artifacts={"llm_call": extra_field},
+        )])
+        with self.assertRaises(ValueError):
+            self.store.save_trace(malformed, CONTEXT)
+        too_many = snapshot(events=[build_trace_event(
+            step="model_decision", artifacts={"llm_call": observation},
+        ) for _ in range(101)])
+        with self.assertRaises(ValueError):
+            self.store.save_trace(too_many, CONTEXT)
+        self.assertFalse(self.path.exists())
+        with self.assertRaises(ValueError):
+            self.store.get_llm_calls("x" * 257)
 
     def test_filters_and_cursor_do_not_duplicate_tied_timestamps(self):
         for _ in range(5):

@@ -1,4 +1,4 @@
-"""任务分类与 ASK/Agent 工作流入口。"""
+"""统一 Agent 的兼容规划接口。"""
 
 from __future__ import annotations
 
@@ -7,24 +7,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from coding_rag.rag.ask import (
-    AskModeConfig,
-    AskModeRun,
-    build_ask_messages,
-    retrieve_for_ask,
-)
 from coding_rag.tools.agent_readonly import ReadOnlyAgentTools, extract_task_identifiers, format_observations
 from coding_rag.tools.bm25 import SearchResult
-from coding_rag.rag.citation_validator import append_citation_validation_report, validate_answer_citations
-from coding_rag.rag.prompt import GenerationMode, format_results_as_context
+from coding_rag.rag.prompt import GenerationMode
 from coding_rag.rag.trace import build_trace_event, build_trace_run
 
 
 class WorkflowMode(str, Enum):
-    """用户任务的执行模式。"""
+    """兼容规划接口的模式；普通请求始终交给统一 Agent。"""
 
     AUTO = "auto"
-    ASK = "ask"
     AGENT = "agent"
 
 
@@ -116,91 +108,19 @@ def classify_task(
     requested_mode: WorkflowMode | str = WorkflowMode.AUTO,
     generation_mode: GenerationMode = GenerationMode.JUDGE,
 ) -> TaskPlan:
-    """根据用户输入和显式模式生成执行计划。"""
-    # 先决定任务走 ASK 还是 Agent；后面的 run_ask_mode / run_agent_plan_mode 都依赖这个结果。
-    mode = WorkflowMode(requested_mode)
-    if mode == WorkflowMode.AUTO:
-        mode = infer_mode(user_input)
-
-    if mode == WorkflowMode.AGENT:
-        return TaskPlan(
-            mode=WorkflowMode.AGENT,
-            intent="plan_and_act",
-            generation_mode=generation_mode,
-            steps=[
-                "理解项目要求并拆分目标",
-                "通过工具检索、读取和验证代码证据",
-                "按 ReAct 的 thought/action/observation 循环推进任务",
-                "产出补丁计划、验证结果和运行记录",
-            ],
-            reason="任务包含修改、实现、修复或项目搭建意图，需要 Agent 执行链路。",
-        )
-
+    """只规划统一 Agent；具体回答、检索或修改由运行时模型决定。"""
+    WorkflowMode(requested_mode)
     return TaskPlan(
-        mode=WorkflowMode.ASK,
-        intent="code_question_answering",
+        mode=WorkflowMode.AGENT,
+        intent="unified_request",
         generation_mode=generation_mode,
         steps=[
-            "基于问题检索代码库",
-            "召回相邻上下文并过滤结果",
-            "把证据块整理为 RAG prompt",
-            "调用大模型生成基于引用的回答",
+            "理解用户目标并判断所需证据",
+            "按需检索、读取和验证代码",
+            "由统一 Agent 决定回答或申请工具调用",
+            "写操作逐次审批，输出证据和运行记录",
         ],
-        reason="任务更像代码库问答，适合 ASK 模式。",
-    )
-
-
-def infer_mode(user_input: str) -> WorkflowMode:
-    """根据任务/请求推断工作流模式。"""
-    q = user_input.casefold()
-    agent_keywords = [
-        "修改",
-        "修复",
-        "新增",
-        "增加",
-        "实现",
-        "搭建",
-        "重构",
-        "优化",
-        "改代码",
-        "patch",
-        "fix",
-        "implement",
-        "refactor",
-    ]
-    return WorkflowMode.AGENT if any(keyword in q for keyword in agent_keywords) else WorkflowMode.ASK
-
-
-def run_ask_mode(
-    query: str,
-    config: AskModeConfig,
-    client: ChatClient | None = None,
-    requested_mode: WorkflowMode | str = WorkflowMode.ASK,
-) -> AskModeRun:
-    """执行 ASK 模式：RAG 检索、prompt 组装和可选 LLM 问答。"""
-    # 这里是 ASK 的业务入口：检索和 prompt 都完成后，只有传入 client 才会真正调用大模型。
-    plan = classify_task(query, requested_mode=requested_mode, generation_mode=config.generation_mode)
-    if plan.mode != WorkflowMode.ASK:
-        raise ValueError("run_ask_mode 只能执行 ASK 模式计划")
-
-    seed_results, recalled_results, final_results, trace = retrieve_for_ask(query, config)
-    context = format_results_as_context(final_results, max_context_chars=config.max_context_chars)
-    messages = build_ask_messages(query, context, config.generation_mode)
-    answer = None
-    if client is not None:
-        raw_answer = client.complete(messages).strip()
-        validation = validate_answer_citations(raw_answer, final_results)
-        answer = append_citation_validation_report(raw_answer, validation)
-
-    return AskModeRun(
-        query=query,
-        plan=plan,
-        seed_results=seed_results,
-        recalled_results=recalled_results,
-        final_results=final_results,
-        trace=trace,
-        messages=messages,
-        answer=answer,
+        reason="不按关键词分流；统一 Agent 根据当前请求和工具观察决定下一步。",
     )
 
 

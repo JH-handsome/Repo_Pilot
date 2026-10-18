@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "benchmark": "patch_outcome_harness_not_llm_intelligence",
+  "evaluator_version": "patch-outcome-v1",
+  "dataset": {
+    "name": "django_patch_outcome_v2.json",
+    "sha256": "2adaa065346d297927f4af3f8af1a4fd575d9aa690fbddccdc8f79fb0e88469e",
+    "suite_id": "django-patch-outcome-v2",
+    "case_count": 3
+  },
+  "task_repositories": [
+    {
+      "id": "duration-negative-iso",
+      "repository_id": "django",
+      "source_path": "django/utils/duration.py",
+      "source_sha256": "1cae44dfa17518674f7210aa1ec9a5a1886b1d7fc1cb2213bce1f2bb1b449521",
+      "test_path": "tests/utils_tests/test_duration.py",
+      "test_sha256": "42d1b867fc3a3e064eb5d6c69753699cb3bfbc2c145bd2931821c0a45cfa7797",
+      "fault_patch_sha256": "01f1fa8927f50400dc191a9ae58fe0ce72c46fea3f4de332d03a7a49e2f7de5d"
+    },
+    {
+      "id": "parse-date-iso",
+      "repository_id": "django",
+      "source_path": "django/utils/dateparse.py",
+      "source_sha256": "ea50d8b5821e8be805f6b4bde14481c14232d8b60dd713508921873eb44f2ade",
+      "test_path": "tests/utils_tests/test_dateparse.py",
+      "test_sha256": "42c8616aadf6ca723f0f8db95072042800220ae7b614c2d5d273f99aa975fdc6",
+      "fault_patch_sha256": "73e8fa2dc40e051d767e6b8a68b61b292281cf5c5b976ed069204c60e20c220e"
+    },
+    {
+      "id": "termcolors-background-options",
+      "repository_id": "django",
+      "source_path": "django/utils/termcolors.py",
+      "source_sha256": "df6a8f3de0359f8ab9b6df9639e56a83307d2bdba4a813f8e419865b2189484b",
+      "test_path": "tests/utils_tests/test_termcolors.py",
+      "test_sha256": "af8d2c11a9f7c2f1d7f8791f7c0cab4ff8d208377d283f07123a382e0d3ac3ed",
+      "fault_patch_sha256": "bdb85e0f284a0c2bdc023fe9e82acc799f3c08dcd39d5eb64cd3982b16b0fe84"
+    }
+  ],
+  "repository": {
+    "id": "django",
+    "path": "data/repos/django",
+    "remote": "github.com/django/django",
+    "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+    "license": "BSD-3-Clause",
+    "license_url": "https://github.com/django/django/blob/09fdc06346b167ff6231a4cb80b85ae67b53c715/LICENSE",
+    "archive_roots": [
+      "django",
+      "tests"
+    ]
+  },
+  "config": {
+    "max_patch_chars": 200000,
+    "max_output_bytes": 12000,
+    "max_timeout_seconds": 60,
+    "shell": false,
+    "execution_trust": "trusted_local_candidate_only",
+    "isolation": "workspace_isolation_not_os_sandbox",
+    "network": "python_socket_guard_and_proxy_defense_in_depth"
+  },
+  "created_at": "2026-09-23T05:09:46.058746+00:00",
+  "candidate": {
+    "provider": "oracle_self_check_v1"
+  },
+  "score": 100.0,
+  "metrics": {
+    "case_count": 3,
+    "harness_valid_rate": 1.0,
+    "pristine_pass_rate": 1.0,
+    "initial_failure_rate": 1.0,
+    "patch_applied_rate": 1.0,
+    "test_pass_rate": 1.0,
+    "allowed_path_precision": 1.0,
+    "forbidden_untouched_rate": 1.0,
+    "minimality_score": 1.0,
+    "timeout_rate": 0.0,
+    "changed_files_avg": 1.0,
+    "test_latency_ms_p50": 135.789,
+    "test_latency_ms_p95": 141.675
+  },
+  "cases": [
+    {
+      "id": "duration-negative-iso",
+      "harness_valid": true,
+      "pristine_pass": true,
+      "initial_failure_proven": true,
+      "patch_applied": true,
+      "tests_pass": true,
+      "allowed_path_precision": 1.0,
+      "forbidden_untouched": true,
+      "minimality_score": 1.0,
+      "changed_file_count": 1,
+      "changed_files": [
+        "django/utils/duration.py"
+      ],
+      "timeout": false,
+      "pristine_test_latency_ms": 245.215,
+      "initial_test_latency_ms": 143.98,
+      "test_latency_ms": 135.789,
+      "apply_latency_ms": 32.668,
+      "output_truncated": false,
+      "provider_error": null,
+      "rejection": null,
+      "score": 100.0
+    },
+    {
+      "id": "parse-date-iso",
+      "harness_valid": true,
+      "pristine_pass": true,
+      "initial_failure_proven": true,
+      "patch_applied": true,
+      "tests_pass": true,
+      "allowed_path_precision": 1.0,
+      "forbidden_untouched": true,
+      "minimality_score": 1.0,
+      "changed_file_count": 1,
+      "changed_files": [
+        "django/utils/dateparse.py"
+      ],
+      "timeout": false,
+      "pristine_test_latency_ms": 232.744,
+      "initial_test_latency_ms": 162.185,
+      "test_latency_ms": 142.329,
+      "apply_latency_ms": 32.782,
+      "output_truncated": false,
+      "provider_error": null,
+      "rejection": null,
+      "score": 100.0
+    },
+    {
+      "id": "termcolors-background-options",
+      "harness_valid": true,
+      "pristine_pass": true,
+      "initial_failure_proven": true,
+      "patch_applied": true,
+      "tests_pass": true,
+      "allowed_path_precision": 1.0,
+      "forbidden_untouched": true,
+      "minimality_score": 1.0,
+      "changed_file_count": 1,
+      "changed_files": [
+        "django/utils/termcolors.py"
+      ],
+      "timeout": false,
+      "pristine_test_latency_ms": 156.254,
+      "initial_test_latency_ms": 120.827,
+      "test_latency_ms": 126.813,
+      "apply_latency_ms": 37.025,
+      "output_truncated": false,
+      "provider_error": null,
+      "rejection": null,
+      "score": 100.0
+    }
+  ]
+}

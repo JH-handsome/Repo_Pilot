@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "evaluation_mode": "offline_retrieval_ab_not_model_behavior",
+  "manifest": "datasets/eval/aider_django_multistep_manifest_v1.json",
+  "development_set": "datasets/eval/aider_django_multistep_v1.jsonl",
+  "transfer_set": "datasets/eval/aider_django_multistep_v2.jsonl",
+  "transfer_set_sha256": "bde235fbaf77e6405b69f4dfdc87c9bd1811cb4f0ed58155f6eae3e296642c28",
+  "transfer_first_look": "benchmarks/aider-django-multistep-v2-first-look.json",
+  "candidate": "Run default Top-5 search and one focused Top-5 search; for slash-command questions focus on command name plus 'implementation', otherwise use text after the final ' and '; merge unique files by reciprocal rank fusion with denominator 60 + rank and prefer original order on ties.",
+  "results": {
+    "development": {
+      "case_count": 8,
+      "default_all_gold_at_5": 6,
+      "fused_all_gold_at_5": 7,
+      "fixed": ["aider-command-lint-provider", "django-request-url-resolver"],
+      "regressed": ["aider-command-test-process"],
+      "default_entry_file_at_1": 8,
+      "fused_entry_file_at_1": 5
+    },
+    "transfer_first_look": {
+      "case_count": 6,
+      "default_all_gold_at_5": 3,
+      "fused_all_gold_at_5": 4,
+      "fixed": ["django-mail-message-send"],
+      "still_incomplete": ["aider-command-web-scraper", "django-shortcut-template-render"],
+      "default_entry_file_at_1": 5
+    }
+  },
+  "first_result_lock": "Keeping the original first file restores the original entry Top-1 on the development set but does not prevent the /test provider from being displaced at Top-5; both datasets have the same all-gold counts as unlocked fusion.",
+  "decision": "Rejected for default Agent search. A second full retrieval per request increases cost, one valid provider regresses, and 2 of 6 independent transfer cases remain incomplete. Keep default search and existing gates unchanged.",
+  "limitations": "The six transfer questions were frozen before the candidate was run on them but are now revealed. This small set is not a general model-ability benchmark; no online LLM or real repair run was used. Latency of the candidate was not measured, so the extra search implies additional work but no quantified runtime claim."
+}

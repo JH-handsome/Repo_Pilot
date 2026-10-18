@@ -1,0 +1,13 @@
+diff --git a/text_utils.py b/text_utils.py
+--- a/text_utils.py
++++ b/text_utils.py
+@@ -1,6 +1,8 @@
+ """Small text helper fixture with an intentionally incomplete slug implementation."""
+ 
++import re
++
+ 
+ def slugify(value: str) -> str:
+     """Convert a label into a lowercase dash-separated slug."""
+-    return value.strip().lower().replace(" ", "-")
++    return re.sub(r"\s+", "-", value.strip().lower())

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "purpose": "Source-audited near-miss targets for the non-explicit call-path generalization probe; component-level negatives, not model reasoning evidence.",
+  "cases": [
+    {
+      "id": "django-json-not-human-duration",
+      "repo_id": "django",
+      "entry_path": "django/core/serializers/json.py",
+      "entry_symbol": "DjangoJSONEncoder.default",
+      "forbidden_target_path": "django/utils/duration.py",
+      "forbidden_target_symbol": "duration_string",
+      "reason": "The timedelta branch calls duration_iso_string, not duration_string."
+    },
+    {
+      "id": "django-token-check-not-encode",
+      "repo_id": "django",
+      "entry_path": "django/contrib/auth/tokens.py",
+      "entry_symbol": "PasswordResetTokenGenerator.check_token",
+      "forbidden_target_path": "django/utils/http.py",
+      "forbidden_target_symbol": "int_to_base36",
+      "reason": "Token verification decodes the timestamp with base36_to_int; token generation uses int_to_base36 elsewhere."
+    },
+    {
+      "id": "django-validator-loader-not-url-resolver",
+      "repo_id": "django",
+      "entry_path": "django/contrib/auth/password_validation.py",
+      "entry_symbol": "get_password_validators",
+      "forbidden_target_path": "django/shortcuts.py",
+      "forbidden_target_symbol": "resolve_url",
+      "reason": "Validator class loading uses import_string, not URL resolution."
+    }
+  ]
+}

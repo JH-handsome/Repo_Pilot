@@ -15,3 +15,5 @@ data/repos/
 .engramory-memory/
 artifacts/*.sqlite3*
 artifacts/trace_pending/
+/trace_pending/
+artifacts/eval/

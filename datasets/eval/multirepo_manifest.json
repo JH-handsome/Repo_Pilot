@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "id": "django",
+      "path": "data/repos/django",
+      "remote": "https://github.com/django/django.git",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/django/django/blob/09fdc06346b167ff6231a4cb80b85ae67b53c715/LICENSE",
+      "purpose": "Pinned production framework source and tests for repository-scale retrieval evaluation."
+    },
+    {
+      "id": "leetcode-python",
+      "path": "datasets/leetcode-python",
+      "remote": "https://github.com/cnkyrpsgl/leetcode.git",
+      "commit": "87fd47d0fba0e5f26f399dd3d9162eef430cc773",
+      "license": "MIT",
+      "license_url": "https://github.com/cnkyrpsgl/leetcode/blob/87fd47d0fba0e5f26f399dd3d9162eef430cc773/LICENSE",
+      "purpose": "Pinned algorithm implementation corpus for behavior and symbol retrieval evaluation."
+    }
+  ]
+}

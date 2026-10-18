@@ -26,6 +26,8 @@ class FunctionMapAndAgentEvalTest(unittest.TestCase):
                             "id": "case-1",
                             "task": "fix target",
                             "repo_files": {"main.py": "def target():\n    pass\n"},
+                            "changed_files": ["main.py"],
+                            "test_files": [],
                             "expected_tools": ["search_code", "read_file"],
                             "expected_sections": ["任务分析", "验证计划"],
                         }
@@ -39,6 +41,10 @@ class FunctionMapAndAgentEvalTest(unittest.TestCase):
 
         self.assertEqual(summary["total"], 1)
         self.assertTrue(rows[0]["trace_complete"])
+        self.assertTrue(rows[0]["candidate_file_hit"])
+        self.assertEqual(rows[0]["candidate_recall_at_5"], 1.0)
+        self.assertEqual(summary["fixture_diagnostic"]["candidate_hit_at_5"], 1.0)
+        self.assertFalse(summary["fixture_diagnostic"]["discriminative"])
         self.assertGreater(summary["avg_expected_tool_coverage"], 0)
 
 

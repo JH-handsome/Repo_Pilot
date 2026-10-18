@@ -1,0 +1,12 @@
+diff --git a/django/utils/dateparse.py b/django/utils/dateparse.py
+--- a/django/utils/dateparse.py
++++ b/django/utils/dateparse.py
+@@ -68,7 +68,7 @@ def parse_date(value):
+     Return None if the input isn't well formatted.
+     """
+     try:
+-        return datetime.date.fromisoformat(value)
++        return None
+     except ValueError:
+         if match := date_re.match(value):
+             kw = {k: int(v) for k, v in match.groupdict().items()}

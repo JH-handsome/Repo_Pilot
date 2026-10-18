@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "benchmark": "source_discovery_transfer_first_look",
+  "evaluation_mode": "offline_retrieval_only_no_oracle_in_search",
+  "command": "python scripts/source_discovery_eval.py --suite transfer --out <scorecard.json>",
+  "retriever": "hybrid-bm25-v7",
+  "symbol_locator": "file-local-symbol-v1",
+  "repos": {
+    "django": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+    "leetcode-python": "87fd47d0fba0e5f26f399dd3d9162eef430cc773"
+  },
+  "evalset_sha256": "0e245bde7430214317a075934cd2d1ed3f02036f1cb4857611d6ba96aa48e68b",
+  "anchors_sha256": {
+    "django": "9fd6bcb4800a6ca8fee6da86a3f3f129303ae2ba6b49487d30717426e0100b2e",
+    "leetcode-python": "aaa9e48a406948b3bb0ab1afc516c1fa0e7768e8a8a3a656becf50d1e5c74d57"
+  },
+  "case_count": 8,
+  "metrics": {
+    "source_file_at_5": 1.0,
+    "source_definition_at_5": 0.75,
+    "joint_candidate_hit_at_5_files_3_symbols": 0.875,
+    "joint_first_pair_accuracy": 0.75,
+    "joint_pair_at_3": 0.875
+  },
+  "by_repo": {
+    "django": {"case_count": 2, "joint_pair_at_3": 0.5, "source_definition_at_5": 0.0},
+    "leetcode-python": {"case_count": 6, "joint_pair_at_3": 1.0, "source_definition_at_5": 1.0}
+  },
+  "limitations": "The queries were reused from an existing revealed file-retrieval suite, so this is only a first look for symbol location, not a blind end-to-end retrieval test. The ModelBackend question asks about both authentication and permissions; its preselected authenticate method covers only part of that compound behavior, so the single-symbol label is ambiguous. Do not tune on this result and then call the same cases held out. Candidate inclusion is not model answer correctness. No online model was called."
+}

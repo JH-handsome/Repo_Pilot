@@ -1,7 +1,8 @@
 ﻿from pathlib import Path
 import unittest
 
-from coding_rag.tools.bm25 import BM25Retriever
+from coding_rag.tools.bm25 import BM25Retriever, path_identifier_score
+from coding_rag.tools.tokenizer import CodeTokenizer
 from coding_rag.repository.chunks import CodeChunk
 
 
@@ -35,6 +36,21 @@ class BM25RetrieverRepoIndexTest(unittest.TestCase):
         results = BM25Retriever(chunks).search("Solution twoSum 鍑芥暟绛惧悕", top_k=1)
 
         self.assertEqual(results[0].chunk.file_path, Path("solutions/python3/1.py"))
+
+    def test_path_identifier_score_matches_filename_and_singular_form(self):
+        tokenizer = CodeTokenizer()
+        self.assertEqual(
+            path_identifier_score({"bm25"}, Path("coding_rag/tools/bm25.py"), tokenizer),
+            1.0,
+        )
+        self.assertEqual(
+            path_identifier_score({"chunk"}, Path("coding_rag/repository/chunks.py"), tokenizer),
+            0.5,
+        )
+        self.assertEqual(
+            path_identifier_score({"code", "module"}, Path("coding_rag/tools/filter.py"), tokenizer),
+            0.0,
+        )
 
 
 if __name__ == "__main__":

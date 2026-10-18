@@ -1,9 +1,33 @@
 ﻿import unittest
 
-from coding_rag.tools.tokenizer import tokenize
+from coding_rag.tools.tokenizer import CodeTokenizer, _cached_identifier_tokens, tokenize
 
 
 class CodeTokenizerTest(unittest.TestCase):
+    def test_cached_identifier_tokens_keep_independent_list_semantics(self):
+        tokenizer = CodeTokenizer()
+        hits_before = _cached_identifier_tokens.cache_info().hits
+        first = tokenizer.tokenize_identifier("__BaseHandler.resolve_request__")
+        self.assertEqual(first, ["basehandler.resolve_request", "base", "handler.resolve", "request"])
+        first.append("mutated")
+        self.assertEqual(
+            tokenizer.tokenize_identifier("__BaseHandler.resolve_request__"),
+            ["basehandler.resolve_request", "base", "handler.resolve", "request"],
+        )
+        self.assertEqual(
+            CodeTokenizer(keep_full_identifier=False).tokenize_identifier("get_resolver"),
+            ["get", "resolver"],
+        )
+        self.assertGreater(_cached_identifier_tokens.cache_info().hits, hits_before)
+        self.assertLessEqual(_cached_identifier_tokens.cache_info().currsize, 32768)
+
+    def test_long_identifier_bypasses_cache(self):
+        tokenizer = CodeTokenizer()
+        identifier = "A" * 129
+        before = _cached_identifier_tokens.cache_info()
+        self.assertEqual(tokenizer.tokenize_identifier(identifier), [identifier.lower()])
+        self.assertEqual(_cached_identifier_tokens.cache_info(), before)
+
     def test_split_snake_case_identifier(self):
         tokens = tokenize("build_binary_tree")
 
@@ -38,6 +62,18 @@ class CodeTokenizerTest(unittest.TestCase):
 
         self.assertIn("test", tokens)
         self.assertIn("assert", tokens)
+
+    def test_query_only_developer_concepts_do_not_change_document_terms(self):
+        tokenizer = CodeTokenizer()
+        query = "审批指纹、代码行号与目录"
+        document_terms = tokenizer.tokenize(query)
+        query_terms = tokenizer.tokenize_query(query)
+
+        self.assertNotIn("fingerprint", document_terms)
+        self.assertNotIn("dirnames", document_terms)
+        for term in ("approval", "fingerprint", "start_line", "dirnames"):
+            self.assertIn(term, query_terms)
+            self.assertEqual(query_terms.count(term), 1)
 
 
 if __name__ == "__main__":

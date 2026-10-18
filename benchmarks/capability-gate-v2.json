@@ -1,0 +1,14 @@
+{
+  "max_drop": {
+    "overall_score": 2.0,
+    "retrieval.hit_at_1": 0.05,
+    "retrieval.mrr_at_5": 0.02,
+    "retrieval.recall_at_5": 0.02,
+    "agent.fixture_diagnostic.dataset_coverage": 0.0,
+    "agent.offline_contract.trace_complete_rate": 0.0,
+    "agent.offline_contract.safe_tool_interface_rate": 0.0
+  },
+  "max_ratio": {
+    "efficiency.query_latency_ms_p95": 1.5
+  }
+}

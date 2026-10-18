@@ -160,7 +160,7 @@ def retrieve_agent_context(
 
     retriever = BM25Retriever(chunks)
     candidate_k = config.candidate_k or config.top_k
-    seed_results = retriever.search(task, top_k=candidate_k)
+    seed_results, scores = retriever.search_with_scores(task, top_k=candidate_k)
     max_recall_results = config.max_recall_results
     if max_recall_results is None:
         max_recall_results = max(20, candidate_k * ((2 * max(config.recall_window, 0)) + 1))
@@ -180,6 +180,7 @@ def retrieve_agent_context(
         retriever=retriever,
         final_k=None if final_k == 0 else final_k,
         min_score=config.min_final_score,
+        scores=scores,
     )
     trace = build_retrieval_trace(
         query=task,

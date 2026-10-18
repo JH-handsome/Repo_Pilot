@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "label": "exact_qualified_definition_absent_not_runtime_behavior_absent",
+  "frozen_on": "2026-09-28",
+  "cases": [
+    {
+      "id": "aider-map-incremental-tags-missing",
+      "repo_id": "aider",
+      "query": "Where is RepoMap.get_incremental_tags_map defined for updating only changed repository tags?",
+      "exact_symbol": "RepoMap.get_incremental_tags_map",
+      "audit_path": "aider/repomap.py"
+    },
+    {
+      "id": "aider-linter-async-command-missing",
+      "repo_id": "aider",
+      "query": "Locate Linter.run_async_cmd, the method that asynchronously executes a configured lint command.",
+      "exact_symbol": "Linter.run_async_cmd",
+      "audit_path": "aider/linter.py"
+    },
+    {
+      "id": "aider-coder-analysis-removal-missing",
+      "repo_id": "aider",
+      "query": "Where is Coder.remove_analysis_content defined to strip analysis text from a partial response?",
+      "exact_symbol": "Coder.remove_analysis_content",
+      "audit_path": "aider/coders/base_coder.py"
+    },
+    {
+      "id": "aider-map-incremental-token-estimate-missing",
+      "repo_id": "aider",
+      "query": "Locate RepoMap.estimate_incremental_tokens for estimating tokens only in changed map lines.",
+      "exact_symbol": "RepoMap.estimate_incremental_tokens",
+      "audit_path": "aider/repomap.py"
+    },
+    {
+      "id": "django-session-cookie-decrypt-missing",
+      "repo_id": "django",
+      "query": "Where is SessionStore.decrypt_session_cookie defined to decrypt the signed cookie before loading a session?",
+      "exact_symbol": "SessionStore.decrypt_session_cookie",
+      "audit_path": "django/contrib/sessions/backends/signed_cookies.py"
+    },
+    {
+      "id": "django-filefield-upload-validation-missing",
+      "repo_id": "django",
+      "query": "Locate FileField.validate_upload_filename before storage receives the generated upload name.",
+      "exact_symbol": "FileField.validate_upload_filename",
+      "audit_path": "django/db/models/fields/files.py"
+    },
+    {
+      "id": "django-model-form-builder-missing",
+      "repo_id": "django",
+      "query": "Where is ModelFormMixin.build_form_class defined when a generic editing view configures its fields?",
+      "exact_symbol": "ModelFormMixin.build_form_class",
+      "audit_path": "django/views/generic/edit.py"
+    },
+    {
+      "id": "django-datetime-storage-awareness-missing",
+      "repo_id": "django",
+      "query": "Locate DateTimeField.make_aware_for_storage for converting a naive datetime before saving it.",
+      "exact_symbol": "DateTimeField.make_aware_for_storage",
+      "audit_path": "django/db/models/fields/__init__.py"
+    }
+  ]
+}

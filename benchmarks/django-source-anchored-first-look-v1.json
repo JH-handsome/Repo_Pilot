@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "label": "oracle_source_anchor_component_diagnostic_not_end_to_end_agent_accuracy",
+  "candidate_version": "call-edge-candidates-v1",
+  "repository_commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+  "repository_fingerprint": "d94dd9fe1bc5be1e353c86d5a37696641d82edb2e678eb70a60118a71bbf28a5",
+  "manifest_sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e",
+  "anchors_sha256": "84505d450a3f259d25e7cecf866c63080e1fff8a223936aa1a62ff6dbe5a45b9",
+  "grounding_sha256": "f1298175c78710d2bf07e4ffd516729a077ae93a782aff22fd1a33a8086bb6c3",
+  "datasets": {
+    "multirepo_call_path_generalization_holdout_v3.jsonl": "473c6d1b56850ea6a99e209aa386c1e9f6d2c23903e3bfac7b2ceea6f583d387",
+    "multirepo_call_edge_negative_v1.jsonl": "b26f368ccdc42dfb30d189181551f324bfc755f0c53c79f1655474da57ee7263"
+  },
+  "config": {"top_k": 5, "source_files": 1, "line_weight": 1.0, "candidate_mode": "source_anchored"},
+  "positive_case_count": 4,
+  "exact_edge_at_1": 4,
+  "exact_edge_at_3": 4,
+  "negative_case_count": 4,
+  "negative_suggestion_at_1": 0,
+  "negative_abstention_count": 4,
+  "interpretation": "The exact source file and function were supplied from labels. These revealed cases isolate outgoing-edge ranking and do not measure automatic source discovery or answer quality."
+}

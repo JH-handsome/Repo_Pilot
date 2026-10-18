@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "benchmark": "real_multirepo_source_retrieval",
+  "created_at": "2026-09-28T09:20:17.933327+00:00",
+  "dataset": {
+    "name": "aider_django_multistep_v1.jsonl",
+    "sha256": "c85d89ddd434c1917cf34764e8452c5e3e7bf7e0550ae893fabfb308dcb17886",
+    "case_count": 8
+  },
+  "manifest": {
+    "name": "aider_django_multistep_manifest_v1.json",
+    "sha256": "6bfde77892d70257ceb84869e8655284c316bd0d55f9696071502e833ddfa9cf",
+    "schema_version": 1
+  },
+  "repositories": [
+    {
+      "id": "aider",
+      "path": "data/repos/aider",
+      "remote": "github.com/aider-ai/aider",
+      "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/LICENSE.txt",
+      "purpose": "Pinned coding-agent source for tool-entry-to-implementation retrieval.",
+      "fingerprint": "2abb959a5c51d4b8520071e27016bb3b7b888ff31d42f4948d8af8a209ec0ef5"
+    },
+    {
+      "id": "django",
+      "path": "data/repos/django",
+      "remote": "github.com/django/django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/django/django/blob/09fdc06346b167ff6231a4cb80b85ae67b53c715/LICENSE",
+      "purpose": "Pinned framework source for request-entry-to-provider retrieval.",
+      "fingerprint": "d94dd9fe1bc5be1e353c86d5a37696641d82edb2e678eb70a60118a71bbf28a5"
+    }
+  ],
+  "config": {
+    "top_k": 5,
+    "chunk_size": 40,
+    "overlap": 5,
+    "recall_window": 2,
+    "max_recall_results": null,
+    "min_final_score": 0.0,
+    "graph_weight": 0.0,
+    "path_weight": 0.25,
+    "exclude_roots": [
+      "data",
+      "datasets",
+      "artifacts"
+    ]
+  },
+  "retriever": "hybrid-bm25-path-v7",
+  "quality_score": 94.18384550108321,
+  "metrics": {
+    "case_count": 8,
+    "hit_at_1": 1.0,
+    "hit_at_5": 1.0,
+    "mrr_at_5": 1.0,
+    "recall_at_5": 0.875,
+    "all_gold_at_5": 0.75,
+    "ndcg_at_5": 0.8472076400866565,
+    "bad_case_count": 0,
+    "bad_case_ids": [],
+    "incomplete_case_count": 2,
+    "incomplete_case_ids": [
+      "aider-command-lint-provider",
+      "django-request-url-resolver"
+    ]
+  },
+  "by_repo": {
+    "aider": {
+      "case_count": 4,
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "recall_at_5": 0.875,
+      "all_gold_at_5": 0.75,
+      "ndcg_at_5": 0.8418944558603892,
+      "bad_case_count": 0,
+      "bad_case_ids": [],
+      "incomplete_case_count": 1,
+      "incomplete_case_ids": [
+        "aider-command-lint-provider"
+      ]
+    },
+    "django": {
+      "case_count": 4,
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "recall_at_5": 0.875,
+      "all_gold_at_5": 0.75,
+      "ndcg_at_5": 0.8525208243129239,
+      "bad_case_count": 0,
+      "bad_case_ids": [],
+      "incomplete_case_count": 1,
+      "incomplete_case_ids": [
+        "django-request-url-resolver"
+      ]
+    }
+  },
+  "by_task_type": {
+    "entry_to_provider": {
+      "case_count": 8,
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "recall_at_5": 0.875,
+      "all_gold_at_5": 0.75,
+      "ndcg_at_5": 0.8472076400866565,
+      "bad_case_count": 0,
+      "bad_case_ids": [],
+      "incomplete_case_count": 2,
+      "incomplete_case_ids": [
+        "aider-command-lint-provider",
+        "django-request-url-resolver"
+      ]
+    }
+  },
+  "by_difficulty": {
+    "hard": {
+      "case_count": 7,
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "recall_at_5": 0.8571428571428571,
+      "all_gold_at_5": 0.7142857142857143,
+      "ndcg_at_5": 0.825380160099036,
+      "bad_case_count": 0,
+      "bad_case_ids": [],
+      "incomplete_case_count": 2,
+      "incomplete_case_ids": [
+        "aider-command-lint-provider",
+        "django-request-url-resolver"
+      ]
+    },
+    "medium": {
+      "case_count": 1,
+      "hit_at_1": 1.0,
+      "hit_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "recall_at_5": 1.0,
+      "all_gold_at_5": 1.0,
+      "ndcg_at_5": 1.0,
+      "bad_case_count": 0,
+      "bad_case_ids": [],
+      "incomplete_case_count": 0,
+      "incomplete_case_ids": []
+    }
+  },
+  "efficiency": {
+    "file_count": 3065,
+    "chunk_count": 16991,
+    "index_build_ms": 37584.57630000339,
+    "query_latency_ms_p50": 220.48555000219494,
+    "query_latency_ms_p95": 999.9152349999345,
+    "context_chars_avg": 6990.125,
+    "context_chars_p95": 7882.05,
+    "by_repo": {
+      "aider": {
+        "file_count": 147,
+        "chunk_count": 1145,
+        "index_build_ms": 2176.7862000015157,
+        "query_latency_ms_p50": 17.271799999434734,
+        "query_latency_ms_p95": 28.01285000186908,
+        "context_chars_avg": 7101.5,
+        "context_chars_p95": 7822.65
+      },
+      "django": {
+        "file_count": 2918,
+        "chunk_count": 15846,
+        "index_build_ms": 35407.790100001876,
+        "query_latency_ms_p50": 481.1300500005018,
+        "query_latency_ms_p95": 1144.3704149998664,
+        "context_chars_avg": 6878.75,
+        "context_chars_p95": 7628.25
+      }
+    }
+  },
+  "cases": [
+    {
+      "repo_id": "aider",
+      "id": "aider-command-lint-provider",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "all_gold_at_k": 0.0,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 29.80790000219713,
+      "context_chars": 6438,
+      "result_files": [
+        "aider/commands.py",
+        "aider/coders/base_coder.py",
+        "aider/editor.py",
+        "aider/main.py",
+        "aider/io.py"
+      ],
+      "gold_files": [
+        "aider/commands.py",
+        "aider/linter.py"
+      ]
+    },
+    {
+      "repo_id": "aider",
+      "id": "aider-command-test-process",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 0.8772153153380493,
+      "latency_ms": 17.84090000001015,
+      "context_chars": 6889,
+      "result_files": [
+        "aider/commands.py",
+        "aider/io.py",
+        "aider/coders/base_coder.py",
+        "aider/run_cmd.py",
+        "aider/coders/shell.py"
+      ],
+      "gold_files": [
+        "aider/commands.py",
+        "aider/run_cmd.py"
+      ]
+    },
+    {
+      "repo_id": "aider",
+      "id": "aider-command-map-build",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 0.8772153153380493,
+      "latency_ms": 16.702699998859316,
+      "context_chars": 7944,
+      "result_files": [
+        "aider/commands.py",
+        "aider/coders/search_replace.py",
+        "aider/coders/shell.py",
+        "aider/repomap.py",
+        "aider/repo.py"
+      ],
+      "gold_files": [
+        "aider/commands.py",
+        "aider/repomap.py"
+      ]
+    },
+    {
+      "repo_id": "aider",
+      "id": "aider-command-settings-format",
+      "task_type": "entry_to_provider",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 15.796699997736141,
+      "context_chars": 7135,
+      "result_files": [
+        "aider/commands.py",
+        "aider/format_settings.py",
+        "aider/args.py",
+        "aider/models.py",
+        "aider/main.py"
+      ],
+      "gold_files": [
+        "aider/commands.py",
+        "aider/format_settings.py"
+      ]
+    },
+    {
+      "repo_id": "django",
+      "id": "django-middleware-import",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 0.8772153153380493,
+      "latency_ms": 1252.7117999998154,
+      "context_chars": 6790,
+      "result_files": [
+        "django/core/handlers/base.py",
+        "django/core/handlers/wsgi.py",
+        "django/core/handlers/asgi.py",
+        "django/utils/module_loading.py",
+        "django/contrib/staticfiles/handlers.py"
+      ],
+      "gold_files": [
+        "django/core/handlers/base.py",
+        "django/utils/module_loading.py"
+      ]
+    },
+    {
+      "repo_id": "django",
+      "id": "django-request-url-resolver",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "all_gold_at_k": 0.0,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 431.82420000084676,
+      "context_chars": 6842,
+      "result_files": [
+        "django/core/handlers/base.py",
+        "django/contrib/staticfiles/handlers.py",
+        "django/core/handlers/wsgi.py",
+        "django/core/handlers/asgi.py",
+        "django/views/generic/base.py"
+      ],
+      "gold_files": [
+        "django/core/handlers/base.py",
+        "django/urls/resolvers.py"
+      ]
+    },
+    {
+      "repo_id": "django",
+      "id": "django-auth-password-mitigation",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 411.16320000219275,
+      "context_chars": 6116,
+      "result_files": [
+        "django/contrib/auth/backends.py",
+        "django/contrib/auth/__init__.py",
+        "django/contrib/auth/handlers/modwsgi.py",
+        "django/contrib/auth/models.py",
+        "django/db/backends/base/operations.py"
+      ],
+      "gold_files": [
+        "django/contrib/auth/backends.py",
+        "django/contrib/auth/__init__.py"
+      ]
+    },
+    {
+      "repo_id": "django",
+      "id": "django-asgi-async-response",
+      "task_type": "entry_to_provider",
+      "difficulty": "hard",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "all_gold_at_k": 1.0,
+      "ndcg_at_k": 0.9197207891481876,
+      "latency_ms": 530.4359000001568,
+      "context_chars": 7767,
+      "result_files": [
+        "django/core/handlers/asgi.py",
+        "django/contrib/staticfiles/handlers.py",
+        "django/core/handlers/base.py",
+        "django/test/client.py",
+        "tests/staticfiles_tests/test_handlers.py"
+      ],
+      "gold_files": [
+        "django/core/handlers/asgi.py",
+        "django/core/handlers/base.py"
+      ]
+    }
+  ]
+}
