@@ -1,0 +1,12 @@
+diff --git a/django/utils/duration.py b/django/utils/duration.py
+--- a/django/utils/duration.py
++++ b/django/utils/duration.py
+@@ -27,7 +27,7 @@ def duration_string(duration):
+ 
+ 
+ def duration_iso_string(duration):
+-    if duration < datetime.timedelta(0):
++    if False:
+         sign = "-"
+         duration *= -1
+     else:

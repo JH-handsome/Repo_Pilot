@@ -1,0 +1,13 @@
+{
+  "max_drop": {
+    "quality_score": 2.0,
+    "metrics.hit_at_1": 0.0,
+    "metrics.mrr_at_5": 0.0,
+    "metrics.recall_at_5": 0.0,
+    "metrics.all_gold_at_5": 0.0,
+    "metrics.ndcg_at_5": 0.03
+  },
+  "max_ratio": {
+    "efficiency.query_latency_ms_p95": 1.5
+  }
+}

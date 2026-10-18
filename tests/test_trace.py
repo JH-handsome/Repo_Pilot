@@ -32,7 +32,7 @@ class RetrievalTraceTest(unittest.TestCase):
         self.assertEqual(trace["summary"]["final_count"], 2)
         self.assertEqual(trace["summary"]["context_block_count"], 1)
         self.assertEqual(trace["trace_version"], "1.0")
-        self.assertEqual(trace["run"]["mode"], "ask")
+        self.assertEqual(trace["run"]["mode"], "retrieval")
         self.assertIn("events", trace)
         self.assertIn("artifacts", trace)
         self.assertIn("retrieval", trace["artifacts"])

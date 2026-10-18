@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "id": "aider",
+      "path": "data/repos/aider",
+      "remote": "https://github.com/Aider-AI/aider.git",
+      "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/LICENSE.txt",
+      "purpose": "Pinned coding-agent source for tool-entry-to-implementation retrieval."
+    },
+    {
+      "id": "django",
+      "path": "data/repos/django",
+      "remote": "https://github.com/django/django.git",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/django/django/blob/09fdc06346b167ff6231a4cb80b85ae67b53c715/LICENSE",
+      "purpose": "Pinned framework source for request-entry-to-provider retrieval."
+    }
+  ]
+}

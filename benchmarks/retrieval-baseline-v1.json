@@ -1,0 +1,510 @@
+{
+  "schema_version": 2,
+  "experiment": {
+    "created_at": "2026-09-22T12:08:53.950664+00:00",
+    "git_commit": "bb52e0b0fe8cdc90f76f700d3412c002e7cc8de5",
+    "dirty": true,
+    "python_version": "3.13.9",
+    "platform": "windows",
+    "datasets": {
+      "retrieval": {
+        "name": "trace.jsonl",
+        "sha256": "67913622ed142e1afbfddcaae6bfae4eb8a940cb75daa70ba054f2e780281305",
+        "case_count": 20
+      },
+      "agent": {
+        "name": "agent_plan_cases.json",
+        "sha256": "9dee7e65a1be955835d14a472c129cb29b10b733b12831eda93caf4e9c7ed0e2",
+        "case_count": 50
+      }
+    },
+    "repo_fingerprint": "a9646085e291fca07b08fa72d6c064f3e31810fd88084b73930b70161f907199",
+    "config": {
+      "top_k": 5,
+      "chunk_size": 40,
+      "overlap": 5,
+      "recall_window": 2,
+      "max_recall_results": null,
+      "min_final_score": 0.0,
+      "graph_weight": 0.0,
+      "path_weight": 0.25,
+      "exclude_roots": [
+        "data",
+        "datasets",
+        "artifacts"
+      ]
+    },
+    "retriever": {
+      "name": "hybrid-bm25-path-v4",
+      "weights": {
+        "lexical_hybrid": 0.75,
+        "path_identifier": 0.25,
+        "dependency_graph": 0.0
+      },
+      "structural_ranker": null
+    },
+    "seed": null
+  },
+  "retrieval": {
+    "case_count": 20,
+    "hit_at_1": 0.5,
+    "hit_at_5": 0.85,
+    "mrr_at_5": 0.635,
+    "recall_at_5": 0.75,
+    "ndcg_at_5": 0.614736374452828,
+    "bad_case_count": 3,
+    "bad_case_ids": [
+      "q002",
+      "q012",
+      "q015"
+    ]
+  },
+  "efficiency": {
+    "file_count": 102,
+    "chunk_count": 775,
+    "index_build_ms": 1360.0537000020267,
+    "query_latency_ms_p50": 71.8070999973861,
+    "query_latency_ms_p95": 115.20783999949347,
+    "context_chars_avg": 5755.6,
+    "context_chars_p95": 7341.05
+  },
+  "agent": {
+    "evaluation_mode": "offline_contract",
+    "case_count": 50,
+    "offline_contract": {
+      "expected_tool_coverage": 1.0,
+      "section_coverage": 1.0,
+      "trace_complete_rate": 1.0,
+      "safe_tool_interface_rate": 1.0
+    },
+    "fixture_diagnostic": {
+      "candidate_k": 5,
+      "candidate_hit_at_5": 1.0,
+      "candidate_recall_at_5": 1.0,
+      "candidate_mrr_at_5": 1.0,
+      "discriminative": false,
+      "negative_file_count": 0,
+      "empty_gold_count": 0,
+      "gold_file_count": 133,
+      "available_gold_count": 120,
+      "missing_gold_count": 13,
+      "cases_with_missing_gold": [
+        "astropy__astropy-13398",
+        "django__django-11138",
+        "django__django-11276"
+      ],
+      "dataset_coverage": 0.9022556390977443,
+      "by_repo": {
+        "astropy/astropy": {
+          "case_count": 22,
+          "candidate_hit_at_5": 1.0,
+          "candidate_recall_at_5": 1.0,
+          "candidate_mrr_at_5": 1.0,
+          "empty_gold_count": 0,
+          "gold_file_count": 52,
+          "available_gold_count": 51,
+          "missing_gold_count": 1,
+          "negative_file_count": 0,
+          "discriminative": false,
+          "dataset_coverage": 0.9807692307692307
+        },
+        "django/django": {
+          "case_count": 28,
+          "candidate_hit_at_5": 1.0,
+          "candidate_recall_at_5": 1.0,
+          "candidate_mrr_at_5": 1.0,
+          "empty_gold_count": 0,
+          "gold_file_count": 81,
+          "available_gold_count": 69,
+          "missing_gold_count": 12,
+          "negative_file_count": 0,
+          "discriminative": false,
+          "dataset_coverage": 0.8518518518518519
+        }
+      }
+    }
+  },
+  "overall_score": 64.30920468066034,
+  "cases": [
+    {
+      "id": "q001",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.5,
+      "latency_ms": 53.02990000200225,
+      "context_chars": 4558,
+      "result_files": [
+        "coding_rag/tools/recall.py",
+        "coding_rag/rag/prompt.py",
+        "coding_rag/repository/files.py",
+        "coding_rag/agent/langchain_tools.py",
+        "coding_rag/repository/chunks.py"
+      ]
+    },
+    {
+      "id": "q002",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 0.0,
+      "hit_at_k": 0.0,
+      "rr": 0.0,
+      "recall_at_k": 0.0,
+      "ndcg_at_k": 0.0,
+      "latency_ms": 58.131999998295214,
+      "context_chars": 5559,
+      "result_files": [
+        "coding_rag/tools/filter.py",
+        "coding_rag/rag/ask.py",
+        "coding_rag/agent/workflow.py",
+        "tests/test_result_filter.py",
+        "tests/test_tokenizer_repo_terms.py"
+      ]
+    },
+    {
+      "id": "q003",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 56.152500001189765,
+      "context_chars": 5569,
+      "result_files": [
+        "coding_rag/repository/chunks.py",
+        "coding_rag/repository/files.py",
+        "coding_rag/agent/workflow.py",
+        "scripts/import_agent_plan_cases.py",
+        "coding_rag/tools/bm25.py"
+      ]
+    },
+    {
+      "id": "q004",
+      "task_type": "code_location",
+      "difficulty": "medium",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.2,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.38685280723454163,
+      "latency_ms": 52.9884999996284,
+      "context_chars": 6427,
+      "result_files": [
+        "coding_rag/tools/agent_readonly.py",
+        "tests/test_learning_workflow.py",
+        "coding_rag/agent/langchain_tools.py",
+        "coding_rag/agent/executor.py",
+        "coding_rag/repository/chunks.py"
+      ]
+    },
+    {
+      "id": "q005",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 53.87669999618083,
+      "context_chars": 7304,
+      "result_files": [
+        "coding_rag/tools/bm25.py",
+        "tests/test_bm25_repo_index.py",
+        "coding_rag/tools/agent_readonly.py",
+        "coding_rag/repository/index.py",
+        "coding_rag/evaluation/retrieval.py"
+      ]
+    },
+    {
+      "id": "q006",
+      "task_type": "code_location",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 45.73180000443244,
+      "context_chars": 7287,
+      "result_files": [
+        "coding_rag/tools/bm25.py",
+        "tests/test_bm25_retriever.py",
+        "tests/test_bm25_repo_index.py",
+        "coding_rag/rag/judge.py",
+        "tests/test_unified_runtime.py"
+      ]
+    },
+    {
+      "id": "q007",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 82.42489999975078,
+      "context_chars": 5610,
+      "result_files": [
+        "coding_rag/tools/filter.py",
+        "coding_rag/tools/recall.py",
+        "coding_rag/rag/prompt.py",
+        "coding_rag/repository/chunks.py",
+        "main.py"
+      ]
+    },
+    {
+      "id": "q008",
+      "task_type": "code_location",
+      "difficulty": "easy",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 113.16269999952056,
+      "context_chars": 5965,
+      "result_files": [
+        "coding_rag/rag/llm_client.py",
+        "coding_rag/agent/planner.py",
+        "coding_rag/rag/answer_generator.py",
+        "main.py",
+        "coding_rag/rag/judge.py"
+      ]
+    },
+    {
+      "id": "q009",
+      "task_type": "code_explain",
+      "difficulty": "medium",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.6309297535714575,
+      "latency_ms": 56.331899999349844,
+      "context_chars": 5767,
+      "result_files": [
+        "tests/test_file_loader.py",
+        "coding_rag/repository/files.py",
+        "scripts/import_agent_plan_cases.py",
+        "scripts/generate_function_map.py",
+        "coding_rag/repository/index.py"
+      ]
+    },
+    {
+      "id": "q010",
+      "task_type": "code_explain",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 95.48730000096839,
+      "context_chars": 3701,
+      "result_files": [
+        "coding_rag/repository/chunks.py",
+        "coding_rag/tools/bm25.py",
+        "coding_rag/tools/recall.py",
+        "coding_rag/rag/prompt.py",
+        "coding_rag/rag/judge.py"
+      ]
+    },
+    {
+      "id": "q011",
+      "task_type": "code_explain",
+      "difficulty": "medium",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.5,
+      "latency_ms": 65.25169999804348,
+      "context_chars": 8045,
+      "result_files": [
+        "tests/test_bm25_retriever.py",
+        "coding_rag/evaluation/retrieval.py",
+        "coding_rag/tools/bm25.py",
+        "scripts/retrieval_eval.py",
+        "coding_rag/rag/ask.py"
+      ]
+    },
+    {
+      "id": "q012",
+      "task_type": "code_explain",
+      "difficulty": "medium",
+      "hit_at_1": 0.0,
+      "hit_at_k": 0.0,
+      "rr": 0.0,
+      "recall_at_k": 0.0,
+      "ndcg_at_k": 0.0,
+      "latency_ms": 69.94089999352582,
+      "context_chars": 6152,
+      "result_files": [
+        "coding_rag/rag/judge.py",
+        "frontend.py",
+        "web_ui.py",
+        "coding_rag/rag/prompt.py",
+        "tests/test_learning_frontend.py"
+      ]
+    },
+    {
+      "id": "q013",
+      "task_type": "code_explain",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 67.46849999763072,
+      "context_chars": 5519,
+      "result_files": [
+        "coding_rag/rag/prompt.py",
+        "coding_rag/evaluation/retrieval.py",
+        "coding_rag/rag/judge.py",
+        "coding_rag/rag/ask.py",
+        "coding_rag/rag/citation_validator.py"
+      ]
+    },
+    {
+      "id": "q014",
+      "task_type": "code_explain",
+      "difficulty": "hard",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.6934264036172708,
+      "latency_ms": 154.06549999897834,
+      "context_chars": 5409,
+      "result_files": [
+        "coding_rag/rag/judge.py",
+        "coding_rag/rag/answer_generator.py",
+        "coding_rag/rag/llm_client.py",
+        "coding_rag/rag/ask.py",
+        "coding_rag/evaluation/retrieval.py"
+      ]
+    },
+    {
+      "id": "q015",
+      "task_type": "bug_locate",
+      "difficulty": "hard",
+      "hit_at_1": 0.0,
+      "hit_at_k": 0.0,
+      "rr": 0.0,
+      "recall_at_k": 0.0,
+      "ndcg_at_k": 0.0,
+      "latency_ms": 78.7341999966884,
+      "context_chars": 5549,
+      "result_files": [
+        "coding_rag/rag/prompt.py",
+        "coding_rag/rag/judge.py",
+        "coding_rag/tools/filter.py",
+        "frontend.py",
+        "coding_rag/agent/workflow.py"
+      ]
+    },
+    {
+      "id": "q016",
+      "task_type": "bug_locate",
+      "difficulty": "hard",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.5,
+      "latency_ms": 86.51580000150716,
+      "context_chars": 5861,
+      "result_files": [
+        "coding_rag/tools/recall.py",
+        "coding_rag/rag/ask.py",
+        "coding_rag/tools/filter.py",
+        "coding_rag/tools/bm25.py",
+        "coding_rag/rag/judge.py"
+      ]
+    },
+    {
+      "id": "q017",
+      "task_type": "bug_locate",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 101.69190000306116,
+      "context_chars": 5981,
+      "result_files": [
+        "coding_rag/rag/llm_client.py",
+        "coding_rag/learning/workflow.py",
+        "coding_rag/rag/judge.py",
+        "coding_rag/learning/session.py",
+        "coding_rag/rag/prompt.py"
+      ]
+    },
+    {
+      "id": "q018",
+      "task_type": "bug_locate",
+      "difficulty": "hard",
+      "hit_at_1": 0.0,
+      "hit_at_k": 1.0,
+      "rr": 0.5,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 0.6309297535714575,
+      "latency_ms": 89.24319999641739,
+      "context_chars": 5620,
+      "result_files": [
+        "coding_rag/tools/recall.py",
+        "scripts/retrieval_eval.py",
+        "coding_rag/evaluation/retrieval.py",
+        "coding_rag/rag/judge.py",
+        "coding_rag/rag/prompt.py"
+      ]
+    },
+    {
+      "id": "q019",
+      "task_type": "edge_case",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 0.5,
+      "ndcg_at_k": 0.6131471927654584,
+      "latency_ms": 84.14920000359416,
+      "context_chars": 4792,
+      "result_files": [
+        "coding_rag/repository/files.py",
+        "coding_rag/learning/workflow.py",
+        "coding_rag/rag/prompt.py",
+        "tests/test_tokenizer_repo_terms.py",
+        "coding_rag/agent/workflow.py"
+      ]
+    },
+    {
+      "id": "q020",
+      "task_type": "edge_case",
+      "difficulty": "medium",
+      "hit_at_1": 1.0,
+      "hit_at_k": 1.0,
+      "rr": 1.0,
+      "recall_at_k": 1.0,
+      "ndcg_at_k": 1.0,
+      "latency_ms": 73.67330000124639,
+      "context_chars": 4437,
+      "result_files": [
+        "coding_rag/repository/chunks.py",
+        "coding_rag/repository/files.py",
+        "coding_rag/rag/prompt.py",
+        "coding_rag/tools/recall.py",
+        "coding_rag/tools/tokenizer.py"
+      ]
+    }
+  ]
+}

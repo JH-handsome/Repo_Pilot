@@ -110,7 +110,7 @@ class RepoIndex:
         return min(score, 1.5) / 1.5
 
 
-def build_repo_index(chunks: list[CodeChunk]) -> RepoIndex:
+def build_repo_index(chunks: list[CodeChunk], path_root: Path | None = None) -> RepoIndex:
     """将代码块按文件分组并构建仓库索引。"""
     files: dict[str, list[CodeChunk]] = {}
     for chunk in chunks:
@@ -118,19 +118,23 @@ def build_repo_index(chunks: list[CodeChunk]) -> RepoIndex:
 
     return RepoIndex(
         files={
-            file_key: build_file_index(file_chunks)
+            file_key: build_file_index(
+                file_chunks,
+                display_path=display_path(file_chunks[0].file_path, path_root),
+            )
             for file_key, file_chunks in files.items()
         }
     )
 
 
-def build_file_index(chunks: list[CodeChunk]) -> FileIndex:
+def build_file_index(chunks: list[CodeChunk], display_path: Path | None = None) -> FileIndex:
     """从 chunks 重建源码并提取文件结构索引。"""
     first_chunk = chunks[0]
     source = rebuild_source(chunks)
     path = first_chunk.file_path
-    module = module_name(path)
-    directories = tuple(normalize_path(path).split("/")[:-1])
+    metadata_path = display_path or path
+    module = module_name(metadata_path)
+    directories = tuple(normalize_path(metadata_path).split("/")[:-1])
 
     try:
         tree = ast.parse(source)
@@ -145,6 +149,19 @@ def build_file_index(chunks: list[CodeChunk]) -> FileIndex:
         imports=tuple(unique_preserve_order(extract_imports(tree))),
         calls=tuple(unique_preserve_order(extract_calls(tree))),
     )
+
+
+def display_path(path: Path, path_root: Path | None) -> Path:
+    """Return a repository-relative metadata path while preserving the real lookup path."""
+    if path_root is None:
+        return path
+    try:
+        return path.relative_to(path_root)
+    except ValueError:
+        try:
+            return path.resolve().relative_to(path_root.resolve())
+        except ValueError:
+            return Path(path.name)
 
 
 def rebuild_source(chunks: list[CodeChunk]) -> str:

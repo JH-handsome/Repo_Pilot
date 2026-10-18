@@ -288,7 +288,17 @@ def format_results_as_context(
     Returns:
         格式化的上下文字符串
     """
+    context, _ = format_results_as_context_with_ranges(results, max_context_chars)
+    return context
+
+
+def format_results_as_context_with_ranges(
+    results: list,
+    max_context_chars: int = 12000,
+) -> tuple[str, list[tuple[str, int, int]]]:
+    """Render the existing prompt format and record complete code lines actually shown."""
     blocks: list[str] = []
+    visible_ranges: list[tuple[str, int, int]] = []
     used_chars = 0  # 已使用的字符计数
     context_blocks = compact_results_for_context(results)
 
@@ -302,7 +312,9 @@ def format_results_as_context(
             f"### [{index}] {block_info.file_path}:{block_info.start_line}-{block_info.end_line} "
             f"(score={block_info.score:.4f}, {source_label}={sources}{chunk_note})"
         )
-        block = f"{header}\n```python\n{block_info.text.rstrip()}\n```"
+        code = block_info.text.rstrip()
+        block = f"{header}\n```python\n{code}\n```"
+        visible_lines = len(code.splitlines())
 
         # 计算剩余可用字符数
         remaining = max_context_chars - used_chars
@@ -314,15 +326,23 @@ def format_results_as_context(
             header_len = len(header) + len("\n```python\n```")
             max_code_len = max(0, remaining - header_len - 20)
             if max_code_len > 0:
-                truncated_code = block_info.text.rstrip()[:max_code_len] + "\n...[代码已截断]"
+                visible_code = code[:max_code_len]
+                visible_lines = visible_code.count("\n")
+                truncated_code = visible_code + "\n...[代码已截断]"
                 block = f"{header}\n```python\n{truncated_code}\n```"
             else:
                 block = block[:max(0, remaining - 40)].rstrip() + "\n...[代码已截断]"
+                visible_lines = 0
 
         blocks.append(block)
+        if visible_lines:
+            visible_ranges.append((
+                str(block_info.file_path), block_info.start_line,
+                min(block_info.end_line, block_info.start_line + visible_lines - 1),
+            ))
         used_chars += len(block)
 
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks), visible_ranges
 
 
 def compact_results_for_context(results: list) -> list[ContextBlock]:

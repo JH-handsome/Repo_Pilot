@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING
 
 from coding_rag.rag.llm_client import LLMConfig, OpenAICompatibleChatClient
 
-from coding_rag.rag.citation_validator import append_citation_validation_report, validate_answer_citations
+from coding_rag.rag.citation_validator import (
+    append_citation_validation_report, validate_answer_citations_against_ranges,
+)
 from coding_rag.rag.prompt import (
     GenerationMode,
     build_user_prompt,
-    format_results_as_context,
+    format_results_as_context_with_ranges,
     get_system_prompt,
 )
 
@@ -62,7 +64,7 @@ class AnswerGenerator:
             RuntimeError: LLM请求失败
         """
         # 格式化检索结果为上下文
-        context = format_results_as_context(
+        context, visible_ranges = format_results_as_context_with_ranges(
             results,
             max_context_chars=self.max_context_chars,
         )
@@ -79,7 +81,7 @@ class AnswerGenerator:
 
         try:
             answer = self.client.complete(messages)
-            validation = validate_answer_citations(answer, results)
+            validation = validate_answer_citations_against_ranges(answer, visible_ranges)
             return append_citation_validation_report(answer, validation)
         except Exception as e:
             raise RuntimeError(f"生成答案失败: {e}") from e

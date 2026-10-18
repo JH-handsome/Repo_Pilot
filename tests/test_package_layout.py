@@ -22,12 +22,12 @@ class PackageLayoutTest(unittest.TestCase):
         self.assertIsNotNone(CodeTokenizer)
         self.assertIsNotNone(filter_recalled_results)
 
-    def test_rag_package_exports_ask_pipeline(self):
-        from coding_rag.rag.ask import AskModeConfig
-        from coding_rag.rag import AskModeConfig, GenerationMode
+    def test_rag_package_exports_retrieval_pipeline(self):
+        from coding_rag.rag.ask import RetrievalConfig
+        from coding_rag.rag import RetrievalConfig, GenerationMode
         from coding_rag.rag.prompt import GenerationMode
 
-        self.assertIsNotNone(AskModeConfig)
+        self.assertIsNotNone(RetrievalConfig)
         self.assertIsNotNone(GenerationMode)
 
     def test_agent_package_exports_workflow_and_memory(self):

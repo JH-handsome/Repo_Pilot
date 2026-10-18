@@ -55,7 +55,6 @@ class RepoPilotUI:
         self.overlap_var = tk.IntVar(value=5)
         self.recall_window_var = tk.IntVar(value=2)
         self.use_llm_var = tk.BooleanVar(value=False)
-        self.mode_var = tk.StringVar(value="judge")
         self.provider_var = tk.StringVar(value="deepseek")
         self.status_var = tk.StringVar(value="就绪")
         self.evalset_path_var = tk.StringVar(value="datasets/eval/sample_evalset.json")
@@ -95,22 +94,14 @@ class RepoPilotUI:
         llm_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
         llm_bar.pack(fill=tk.X)
         ttk.Checkbutton(llm_bar, text="启用 LLM 生成", variable=self.use_llm_var).grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(llm_bar, text="模式").grid(row=0, column=1, padx=(10, 3))
-        ttk.Combobox(
-            llm_bar,
-            textvariable=self.mode_var,
-            values=["judge", "code-understand", "code-generate", "leetcode", "api"],
-            state="readonly",
-            width=18,
-        ).grid(row=0, column=2)
-        ttk.Label(llm_bar, text="Provider").grid(row=0, column=3, padx=(10, 3))
+        ttk.Label(llm_bar, text="Provider").grid(row=0, column=1, padx=(10, 3))
         ttk.Combobox(
             llm_bar,
             textvariable=self.provider_var,
             values=["deepseek", "qwen", "kimi", "zhipu", "custom"],
             state="readonly",
             width=12,
-        ).grid(row=0, column=4)
+        ).grid(row=0, column=2)
 
         run_bar = ttk.Frame(self.root, padding=(10, 8, 10, 0))
         run_bar.pack(fill=tk.X)
@@ -172,7 +163,7 @@ class RepoPilotUI:
                         repo_path=repo_path, top_k=self.top_k_var.get(),
                         chunk_size=self.chunk_size_var.get(), overlap=self.overlap_var.get(),
                         recall_window=self.recall_window_var.get(),
-                        generation_mode=GenerationMode(self.mode_var.get()),
+                        generation_mode=GenerationMode.JUDGE,
                         session_id=self.session_id_var.get().strip(),
                     ),
                     OpenAICompatibleChatClient(build_llm_config(provider=self.provider_var.get())),
@@ -374,7 +365,7 @@ class RepoPilotUI:
     def _build_llm_args(self):
         """根据界面选项构造评测生成器所需的临时 LLM 参数对象。"""
         return type("Args", (), {
-            "mode": self.mode_var.get(),
+            "mode": GenerationMode.JUDGE.value,
             "llm_provider": self.provider_var.get(),
             "llm_model": None,
             "llm_base_url": None,

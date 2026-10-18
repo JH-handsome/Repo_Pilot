@@ -1,0 +1,17 @@
+{
+  "label": "historical_pre_fix_diagnostic_not_current_gate",
+  "dataset_sha256": "f135a819e55dbb77c7fdf4e2643a3fea1d35b00122dbf8c11f8cecce570cdad0",
+  "policy": "first-query-callable-search-definition-unique-edge-read-both-v2",
+  "metrics": {
+    "case_count": 9,
+    "positive_count": 4,
+    "negative_count": 5,
+    "positive_link_rate": 1.0,
+    "negative_abstain_rate": 0.6,
+    "false_link_count": 2
+  },
+  "false_link_case_ids": [
+    "django-login-not-logout-negative",
+    "django-sitemap-two-targets-unsupported"
+  ]
+}

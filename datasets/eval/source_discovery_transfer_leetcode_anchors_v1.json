@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "transfer-leetcode-two-sum", "source_path": "solutions/python3/1.py", "source_symbol": "Solution.twoSum"},
+    {"id": "transfer-leetcode-merge-k-lists", "source_path": "solutions/python3/23.py", "source_symbol": "Solution.mergeKLists"},
+    {"id": "transfer-leetcode-tree-level-order", "source_path": "solutions/python3/102.py", "source_symbol": "Solution.levelOrder"},
+    {"id": "transfer-leetcode-word-ladder", "source_path": "solutions/python3/127.py", "source_symbol": "Solution.ladderLength"},
+    {"id": "transfer-leetcode-course-schedule", "source_path": "solutions/python3/207.py", "source_symbol": "Solution.canFinish"},
+    {"id": "transfer-leetcode-sliding-median", "source_path": "solutions/python3/480.py", "source_symbol": "Solution.medianSlidingWindow"}
+  ]
+}

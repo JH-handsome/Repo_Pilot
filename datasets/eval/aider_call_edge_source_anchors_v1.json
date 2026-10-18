@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "aider-map-important-files", "source_path": "aider/repomap.py", "source_symbol": "RepoMap.get_ranked_tags_map_uncached"},
+    {"id": "aider-linter-command-execution", "source_path": "aider/linter.py", "source_symbol": "Linter.run_cmd"},
+    {"id": "aider-main-parser-creation", "source_path": "aider/main.py", "source_symbol": "main"},
+    {"id": "aider-coder-reasoning-strip", "source_path": "aider/coders/base_coder.py", "source_symbol": "Coder.remove_reasoning_content"},
+    {"id": "aider-map-token-estimate-local", "source_path": "aider/repomap.py", "source_symbol": "RepoMap.token_count"},
+    {"id": "aider-linter-error-lines-local", "source_path": "aider/linter.py", "source_symbol": "Linter.errors_to_lint_result"},
+    {"id": "aider-config-ignore-path-local", "source_path": "aider/args.py", "source_symbol": "resolve_aiderignore_path"},
+    {"id": "aider-important-file-filter-local", "source_path": "aider/special.py", "source_symbol": "filter_important_files"},
+    {"id": "aider-map-ranked-tags-same-file", "source_path": "aider/repomap.py", "source_symbol": "RepoMap.get_repo_map"},
+    {"id": "aider-linter-basic-lint-same-file", "source_path": "aider/linter.py", "source_symbol": "Linter.lint"},
+    {"id": "aider-coder-mentioned-identifiers-same-file", "source_path": "aider/coders/base_coder.py", "source_symbol": "Coder.get_repo_map"},
+    {"id": "aider-main-config-yes-same-file", "source_path": "aider/main.py", "source_symbol": "main"}
+  ]
+}

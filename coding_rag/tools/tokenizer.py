@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 
 # 匹配标识符、数字和中文文本的正则表达式
@@ -48,6 +49,18 @@ CHINESE_CODE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "断言": ("assert",),
 }
 
+# Query-only concepts bridge Chinese developer language to existing English code
+# identifiers without changing document terms or the persistent index schema.
+CHINESE_QUERY_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "目录": ("directory", "dir", "dirs", "dirnames"),
+    "审批": ("approval", "approve"),
+    "指纹": ("fingerprint",),
+    "行号": ("line", "start_line", "end_line"),
+    "范围": ("range", "start_line", "end_line"),
+    "混合": ("hybrid",),
+    "参数": ("arguments", "args"),
+}
+
 
 @dataclass(frozen=True)
 class CodeTokenizer:
@@ -82,6 +95,17 @@ class CodeTokenizer:
 
         return tokens
 
+    def tokenize_query(self, text: str) -> list[str]:
+        """Expand only query-side Chinese concepts against English code identifiers."""
+        tokens = self.tokenize(text)
+        for raw_token in IDENTIFIER_RE.findall(text):
+            if not is_chinese(raw_token):
+                continue
+            for term, synonyms in CHINESE_QUERY_SYNONYMS.items():
+                if term in raw_token:
+                    tokens.extend(synonym for synonym in synonyms if synonym not in tokens)
+        return tokens
+
     def tokenize_identifier(self, identifier: str) -> list[str]:
         """
         对标识符进行分词
@@ -92,20 +116,10 @@ class CodeTokenizer:
         Returns:
             分词后的 token 列表
         """
-        # 移除下划线并转为小写
-        normalized = identifier.strip("_").lower()
-        if not normalized:
-            return []
+        if len(identifier) <= 128:
+            return list(_cached_identifier_tokens(identifier, self.keep_full_identifier))
+        return list(_identifier_tokens(identifier, self.keep_full_identifier))
 
-        tokens: list[str] = []
-        if self.keep_full_identifier:
-            tokens.append(normalized)
-
-        for part in split_identifier(identifier):
-            if part and part not in tokens:
-                tokens.append(part)
-
-        return tokens
 
     def tokenize_chinese(self, text: str) -> list[str]:
         """
@@ -129,6 +143,27 @@ class CodeTokenizer:
                 tokens.extend(synonym for synonym in synonyms if synonym not in tokens)
 
         return tokens
+
+
+def _identifier_tokens(identifier: str, keep_full_identifier: bool) -> tuple[str, ...]:
+    """Compute immutable identifier tokens using the existing normalization rules."""
+    normalized = identifier.strip("_").lower()
+    if not normalized:
+        return ()
+
+    tokens: list[str] = []
+    if keep_full_identifier:
+        tokens.append(normalized)
+    for part in split_identifier(identifier):
+        if part and part not in tokens:
+            tokens.append(part)
+    return tuple(tokens)
+
+
+@lru_cache(maxsize=32768)
+def _cached_identifier_tokens(identifier: str, keep_full_identifier: bool) -> tuple[str, ...]:
+    """Bound repeated source-token splitting without retaining unbounded strings."""
+    return _identifier_tokens(identifier, keep_full_identifier)
 
 
 def tokenize(text: str) -> list[str]:

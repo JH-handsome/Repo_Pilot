@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "purpose": "Fresh source-audited positive, near-miss, and multi-target cases for explicit call-path navigation. This set was fixed before running the scripted policy against it.",
+  "cases": [
+    {
+      "id": "django-logout-call-positive",
+      "repo_id": "django",
+      "query": "Trace LogoutView.post() when it clears the session through auth_logout().",
+      "entry_path": "django/contrib/auth/views.py",
+      "entry_symbol": "LogoutView.post",
+      "expected_outcome": "link",
+      "target_path": "django/contrib/auth/__init__.py",
+      "target_symbol": "logout"
+    },
+    {
+      "id": "django-bad-request-template-positive",
+      "repo_id": "django",
+      "query": "Trace bad_request() when the 400 response loads its template with loader.get_template().",
+      "entry_path": "django/views/defaults.py",
+      "entry_symbol": "bad_request",
+      "expected_outcome": "link",
+      "target_path": "django/template/loader.py",
+      "target_symbol": "get_template"
+    },
+    {
+      "id": "django-mass-mail-message-positive",
+      "repo_id": "django",
+      "query": "Trace send_mass_mail() when it constructs an EmailMessage() for each recipient group.",
+      "entry_path": "django/core/mail/__init__.py",
+      "entry_symbol": "send_mass_mail",
+      "expected_outcome": "link",
+      "target_path": "django/core/mail/message.py",
+      "target_symbol": "EmailMessage"
+    },
+    {
+      "id": "django-sitemap-reverse-positive",
+      "repo_id": "django",
+      "query": "Trace index() when it resolves sitemap section links using reverse().",
+      "entry_path": "django/contrib/sitemaps/views.py",
+      "entry_symbol": "index",
+      "expected_outcome": "link",
+      "target_path": "django/urls/base.py",
+      "target_symbol": "reverse"
+    },
+    {
+      "id": "django-login-not-logout-negative",
+      "repo_id": "django",
+      "query": "Trace LoginView.form_valid() through auth_logout() after accepting a login form.",
+      "entry_path": "django/contrib/auth/views.py",
+      "entry_symbol": "LoginView.form_valid",
+      "expected_outcome": "abstain",
+      "reason": "auth_logout is imported in the same module but this method calls auth_login instead"
+    },
+    {
+      "id": "django-logout-not-login-negative",
+      "repo_id": "django",
+      "query": "Trace LogoutView.post() through auth_login() when ending a session.",
+      "entry_path": "django/contrib/auth/views.py",
+      "entry_symbol": "LogoutView.post",
+      "expected_outcome": "abstain",
+      "reason": "auth_login is imported in the same module but this method calls auth_logout instead"
+    },
+    {
+      "id": "django-mass-mail-not-multipart-negative",
+      "repo_id": "django",
+      "query": "Trace send_mass_mail() through EmailMultiAlternatives() while sending a batch.",
+      "entry_path": "django/core/mail/__init__.py",
+      "entry_symbol": "send_mass_mail",
+      "expected_outcome": "abstain",
+      "reason": "EmailMultiAlternatives is imported and called by sibling functions, not send_mass_mail"
+    },
+    {
+      "id": "django-sitemap-not-render-helper-negative",
+      "repo_id": "django",
+      "query": "Trace index() through render_to_string() when returning the sitemap index.",
+      "entry_path": "django/contrib/sitemaps/views.py",
+      "entry_symbol": "index",
+      "expected_outcome": "abstain",
+      "reason": "sitemap index constructs TemplateResponse and does not call render_to_string"
+    },
+    {
+      "id": "django-sitemap-two-targets-unsupported",
+      "repo_id": "django",
+      "query": "Trace index() through both reverse() and get_current_site() for sitemap links.",
+      "entry_path": "django/contrib/sitemaps/views.py",
+      "entry_symbol": "index",
+      "expected_outcome": "abstain",
+      "reason": "the current contract supports exactly one target; answering with only one would be incomplete"
+    }
+  ]
+}

@@ -95,20 +95,26 @@ def citation_is_supported(
     if citation.start_line <= 0 or citation.end_line < citation.start_line:
         return False
 
-    for path, start_line, end_line in available_ranges:
-        if not paths_match(citation.path, path):
-            continue
-        if citation.start_line >= start_line and citation.end_line <= end_line:
-            return True
-
-    return False
+    matching_paths = {
+        normalize_path(path) for path, _, _ in available_ranges
+        if paths_match(citation.path, path)
+    }
+    if len(matching_paths) != 1:
+        return False  # A basename shared by several files is not a locator.
+    return any(
+        normalize_path(path) in matching_paths
+        and citation.start_line >= start_line and citation.end_line <= end_line
+        for path, start_line, end_line in available_ranges
+    )
 
 
 def paths_match(cited_path: str, available_path: str) -> bool:
-    """归一化后若路径相等，或其一为另一以斜杠分隔的后缀（支持相对/绝对路径混用），则返回 True。"""
+    """Accept an exact path or a relative citation suffix of an observed absolute path."""
     cited = normalize_path(cited_path)
     available = normalize_path(available_path)
-    return cited == available or available.endswith(f"/{cited}") or cited.endswith(f"/{available}")
+    if cited.startswith("/") or ":" in cited or ".." in cited.split("/"):
+        return cited == available
+    return cited == available or available.endswith(f"/{cited}")
 
 
 def normalize_path(path: str) -> str:

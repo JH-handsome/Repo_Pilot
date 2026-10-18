@@ -6,11 +6,30 @@ from coding_rag.rag.citation_validator import (
     append_citation_validation_report,
     extract_citations,
     validate_answer_citations,
+    validate_answer_citations_against_ranges,
 )
 from coding_rag.tools.bm25 import SearchResult
 
 
 class CitationValidatorTest(unittest.TestCase):
+    def test_rejects_forged_prefix_and_ambiguous_basename(self):
+        ranges = [("pkg1/app.py", 1, 4), ("pkg2/app.py", 1, 4)]
+
+        self.assertFalse(validate_answer_citations_against_ranges(
+            "见 pkg1/app.py:2-2", ranges,
+        ).has_issues)
+        self.assertTrue(validate_answer_citations_against_ranges(
+            "见 forged/pkg1/app.py:2-2", ranges,
+        ).has_issues)
+        self.assertTrue(validate_answer_citations_against_ranges(
+            "见 app.py:2-2", ranges,
+        ).has_issues)
+
+    def test_relative_citation_may_match_observed_absolute_path(self):
+        self.assertFalse(validate_answer_citations_against_ranges(
+            "见 pkg/app.py:2-2", [("C:/repo/pkg/app.py", 1, 4)],
+        ).has_issues)
+
     def test_extracts_path_line_range_citations(self):
         citations = extract_citations("See coding_rag/file_loader.py:10-20.")
 

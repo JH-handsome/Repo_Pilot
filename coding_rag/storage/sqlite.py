@@ -5,13 +5,42 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+from hashlib import sha256
 from pathlib import Path
 import sqlite3
 from time import monotonic, sleep
 from typing import Any, Iterator, Protocol
 
+from coding_rag.rag.llm_client import normalize_llm_call_observation
 
-SCHEMA_VERSION = 1
+
+SCHEMA_VERSION = 3
+JSON_FILE_SCHEMA = (
+    """CREATE TABLE json_files (
+        file_id TEXT PRIMARY KEY, source_path TEXT NOT NULL,
+        format TEXT NOT NULL CHECK (format IN ('json', 'jsonl')),
+        sha256 TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+        record_count INTEGER NOT NULL, saved_at TEXT NOT NULL,
+        content TEXT NOT NULL,
+        UNIQUE (source_path, sha256)
+    )""",
+    "CREATE INDEX json_file_path_time ON json_files(source_path, saved_at)",
+)
+MAX_LLM_CALLS_PER_RUN = 100
+LLM_CALL_SCHEMA = (
+    """CREATE TABLE llm_calls (
+        run_id TEXT NOT NULL REFERENCES trace_runs(run_id) ON DELETE CASCADE,
+        call_index INTEGER NOT NULL CHECK (call_index BETWEEN 1 AND 100),
+        event_seq INTEGER NOT NULL CHECK (event_seq > 0),
+        operation TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        attempts INTEGER NOT NULL CHECK (attempts BETWEEN 1 AND 5),
+        latency_ms REAL NOT NULL CHECK (latency_ms BETWEEN 0 AND 86400000),
+        outcome TEXT NOT NULL CHECK (outcome IN ('success', 'error')),
+        error_class TEXT,
+        PRIMARY KEY (run_id, call_index), UNIQUE (run_id, event_seq)
+    )""",
+    "CREATE INDEX llm_call_outcome ON llm_calls(run_id, outcome)",
+)
 SCHEMA = (
     """CREATE TABLE trace_runs (
         run_id TEXT PRIMARY KEY, session_id TEXT, source TEXT NOT NULL,
@@ -26,6 +55,8 @@ SCHEMA = (
         occurred_at TEXT, error_type TEXT, summary_json TEXT NOT NULL,
         PRIMARY KEY (run_id, seq)
     )""",
+    *LLM_CALL_SCHEMA,
+    *JSON_FILE_SCHEMA,
     "CREATE INDEX trace_repo_time ON trace_runs(repo_key, updated_at, run_id)",
     "CREATE INDEX trace_status_time ON trace_runs(status, updated_at, run_id)",
     "CREATE INDEX trace_time ON trace_runs(updated_at, run_id)",
@@ -93,6 +124,19 @@ class SQLiteTraceStore:
                 for statement in SCHEMA:
                     connection.execute(statement)
                 connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            elif version == 1 and write:
+                for statement in LLM_CALL_SCHEMA:
+                    connection.execute(statement)
+                for statement in JSON_FILE_SCHEMA:
+                    connection.execute(statement)
+                connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            elif version == 2 and write:
+                for statement in JSON_FILE_SCHEMA:
+                    connection.execute(statement)
+                connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            elif version in (1, 2) and not write:
+                # Legacy trace tables remain readable; the next write migrates atomically.
+                pass
             elif version != SCHEMA_VERSION:
                 raise TraceSchemaError("unsupported trace database schema version")
             yield connection
@@ -120,6 +164,94 @@ class SQLiteTraceStore:
                     raise
                 sleep(min(0.02, max(0, deadline - monotonic())))
 
+    def initialize(self) -> None:
+        """Create or migrate a database without inserting synthetic trace records."""
+        with self._connection(write=True):
+            pass
+
+    def save_json_file(self, path: str | Path) -> dict:
+        """Archive sanitized JSON/JSONL content, retaining distinct file versions."""
+        from coding_rag.storage.persistence import sanitize_trace
+
+        source = Path(path).expanduser().resolve()
+        file_format = source.suffix.lower().lstrip(".")
+        if file_format not in {"json", "jsonl"}:
+            raise ValueError("only JSON and JSONL files can be archived")
+        raw = source.read_text(encoding="utf-8-sig")
+        if file_format == "json":
+            content = json.dumps(sanitize_trace(json.loads(raw)), ensure_ascii=False,
+                                 allow_nan=False, indent=2)
+            record_count = 1
+        else:
+            records = [sanitize_trace(json.loads(line)) for line in raw.splitlines() if line.strip()]
+            content = "\n".join(json.dumps(row, ensure_ascii=False, allow_nan=False) for row in records)
+            record_count = len(records)
+        encoded = content.encode("utf-8")
+        digest = sha256(encoded).hexdigest()
+        file_id = sha256((str(source) + "\0" + digest).encode("utf-8")).hexdigest()
+        with self._connection(write=True) as connection:
+            result = connection.execute(
+                """INSERT INTO json_files
+                (file_id,source_path,format,sha256,size_bytes,record_count,saved_at,content)
+                VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(source_path,sha256) DO NOTHING""",
+                (file_id, str(source), file_format, digest, len(encoded), record_count, utc_now(), content),
+            )
+            saved = result.rowcount == 1
+        return {"status": "saved" if saved else "unchanged", "file_id": file_id}
+
+    def get_json_file(self, file_id: str) -> dict | None:
+        """Return file metadata and archived UTF-8 content for local export."""
+        if not self.path.exists():
+            return None
+        with self._connection() as connection:
+            if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+                return None
+            row = connection.execute("SELECT * FROM json_files WHERE file_id=?", (file_id,)).fetchone()
+        return dict(row) if row else None
+
+    def iter_json_files(self) -> Iterator[dict]:
+        """Stream a stable archive snapshot while WAL allows trace writes."""
+        if not self.path.exists():
+            return
+        with self._connection() as connection:
+            if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+                return
+            for row in connection.execute("SELECT * FROM json_files ORDER BY saved_at,file_id"):
+                yield dict(row)
+
+    def get_trace_context(self, run_id: str) -> dict | None:
+        """Read immutable identity for importing an exported existing run."""
+        if not self.path.exists():
+            return None
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT source,repo_key,session_id FROM trace_runs WHERE run_id=?", (run_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_json_files(self, *, source_path: str | Path | None = None,
+                        limit: int = 50, offset: int = 0) -> list[dict]:
+        """List bounded file metadata, optionally restricting to one source path."""
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be a nonnegative integer")
+        if not self.path.exists():
+            return []
+        where, values = "", []
+        if source_path is not None:
+            where = " WHERE source_path=?"
+            values.append(str(Path(source_path).expanduser().resolve()))
+        with self._connection() as connection:
+            if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+                return []
+            rows = connection.execute(
+                "SELECT file_id,source_path,format,sha256,size_bytes,record_count,saved_at "
+                "FROM json_files" + where + " ORDER BY saved_at DESC,file_id DESC LIMIT ? OFFSET ?",
+                (*values, limit, offset),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def save_trace(self, trace: dict, context: dict) -> bool:
         """Save a cumulative snapshot and only append events absent from the store."""
         run = trace["run"]
@@ -132,6 +264,7 @@ class SQLiteTraceStore:
         events = trace.get("events", [])
         if not isinstance(events, list):
             raise ValueError("events must be a list")
+        call_records = _llm_call_records(events)
         encoded = json.dumps(trace, ensure_ascii=False, allow_nan=False)
         source, repo_key = context["source"], context["repo_key"]
         with self._connection(write=True) as connection:
@@ -178,7 +311,63 @@ class SQLiteTraceStore:
                      json.dumps(event.get("output_summary") or {}, ensure_ascii=False,
                                 allow_nan=False)),
                 )
+            previous_call_count = connection.execute(
+                "SELECT count(*) FROM llm_calls WHERE run_id=?", (run_id,),
+            ).fetchone()[0]
+            for record in call_records:
+                if record["event_seq"] <= previous_count:
+                    continue
+                previous_call_count += 1
+                connection.execute(
+                    """INSERT INTO llm_calls (
+                        run_id,call_index,event_seq,operation,provider,model,attempts,
+                        latency_ms,outcome,error_class
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        run_id, previous_call_count, record["event_seq"],
+                        record["operation"], record["provider"], record["model"],
+                        record["attempts"], record["latency_ms"], record["outcome"],
+                        record["error_class"],
+                    ),
+                )
         return True
+
+    def get_llm_calls(self, run_id: str) -> list[dict[str, Any]]:
+        """Return bounded sanitized logical-call records for one run."""
+        _validate_run_id(run_id)
+        if not self.path.exists():
+            return []
+        with self._connection() as connection:
+            if connection.execute("PRAGMA user_version").fetchone()[0] == 1:
+                return []
+            rows = connection.execute(
+                """SELECT call_index,event_seq,operation,provider,model,attempts,
+                          latency_ms,outcome,error_class
+                   FROM llm_calls WHERE run_id=? ORDER BY call_index""",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_llm_summary(self, run_id: str) -> dict[str, Any]:
+        """Aggregate attempts, retries, latency, outcomes and errors for one run."""
+        calls = self.get_llm_calls(run_id)
+        outcomes: dict[str, int] = {}
+        error_classes: dict[str, int] = {}
+        for item in calls:
+            outcomes[item["outcome"]] = outcomes.get(item["outcome"], 0) + 1
+            if item["error_class"] is not None:
+                name = item["error_class"]
+                error_classes[name] = error_classes.get(name, 0) + 1
+        latency = round(sum(item["latency_ms"] for item in calls), 3)
+        return {
+            "call_count": len(calls),
+            "attempt_count": sum(item["attempts"] for item in calls),
+            "retry_count": sum(item["attempts"] - 1 for item in calls),
+            "outcomes": outcomes,
+            "latency_ms_total": latency,
+            "latency_ms_avg": round(latency / len(calls), 3) if calls else 0.0,
+            "error_classes": error_classes,
+        }
 
     def get_trace(self, run_id: str) -> dict | None:
         """Read a complete sanitized trace without returning any execution state."""
@@ -238,3 +427,29 @@ class SQLiteTraceStore:
                 [last["updated_at"], last["run_id"]],
             ).encode()).decode()
         return {"items": items, "next_cursor": next_cursor}
+
+
+def _validate_run_id(run_id: object) -> None:
+    """Reject malformed identifiers before using them in storage queries."""
+    if not isinstance(run_id, str) or not run_id or len(run_id) > 256:
+        raise ValueError("run_id must be a nonempty string of at most 256 characters")
+
+
+def _llm_call_records(events: list[object]) -> list[dict[str, Any]]:
+    """Extract and strictly validate fixed-schema call evidence from trace events."""
+    records: list[dict[str, Any]] = []
+    for event_seq, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            continue
+        artifacts = event.get("artifacts") or {}
+        if not isinstance(artifacts, dict) or "llm_call" not in artifacts:
+            continue
+        if event.get("step") != "model_decision":
+            raise ValueError("llm_call observation must belong to model_decision")
+        observation = normalize_llm_call_observation(artifacts["llm_call"])
+        if observation is None:
+            raise ValueError("invalid llm_call observation")
+        records.append({"event_seq": event_seq, **observation})
+        if len(records) > MAX_LLM_CALLS_PER_RUN:
+            raise ValueError("too many llm_call observations in one run")
+    return records

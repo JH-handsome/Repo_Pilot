@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {"id": "aider-map-important-files", "source_symbol": "RepoMap.get_ranked_tags_map_uncached", "target_symbol": "filter_important_files"},
+    {"id": "aider-linter-command-execution", "source_symbol": "Linter.run_cmd", "target_symbol": "run_cmd_subprocess"},
+    {"id": "aider-main-parser-creation", "source_symbol": "main", "target_symbol": "get_parser"},
+    {"id": "aider-coder-reasoning-strip", "source_symbol": "Coder.remove_reasoning_content", "target_symbol": "remove_reasoning_content"}
+  ]
+}

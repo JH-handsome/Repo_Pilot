@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from coding_rag.agent.safety import AgentSafetyGuard, AgentSafetyPolicy, SafetyDecision
+from coding_rag.repository.files import should_skip
+from coding_rag.repository.search_index import PreparedRepositoryIndex
 from coding_rag.agent.snapshots import SnapshotStore, normalize_snapshot_paths, resolve_repo_file
 from coding_rag.tools.agent_readonly import AgentToolError, ReadOnlyAgentTools
 
@@ -53,12 +55,18 @@ class AgentExecutor:
         safe_mode: bool = False,
         safety_policy: AgentSafetyPolicy | None = None,
         search_provider: SearchProvider | None = None,
+        read_index_provider: Callable[[], PreparedRepositoryIndex] | None = None,
         write_approval: str | None = None,
         snapshot_root: str | Path | None = None,
     ):
         """初始化 Agent 执行器，绑定仓库路径并配置安全策略与工具集。"""
         self.repo_path = Path(repo_path).resolve()
-        self.readonly = ReadOnlyAgentTools(self.repo_path, chunk_size=chunk_size, overlap=overlap)
+        self.readonly = ReadOnlyAgentTools(
+            self.repo_path,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            index_provider=read_index_provider,
+        )
         self.search_provider = search_provider
         if safety_policy is None:
             safety_policy = AgentSafetyPolicy(
@@ -90,6 +98,11 @@ class AgentExecutor:
                 query=str(args.get("query") or ""),
                 top_k=int(args.get("top_k") or 5),
             )
+        if name == "trace_call_path":
+            return self.trace_call_path(
+                path=str(args.get("path") or ""),
+                symbol=str(args.get("symbol") or ""),
+            )
         if name == "apply_patch":
             return self.apply_patch(str(args.get("diff") or ""))
         if name == "run_command":
@@ -116,6 +129,10 @@ class AgentExecutor:
         if self.search_provider is not None:
             return self.search_provider(query, top_k)
         return self.readonly.search_code(query, top_k=top_k)
+
+    def trace_call_path(self, path: str, symbol: str) -> dict[str, Any]:
+        """Trace static Python calls using the same repository read boundary."""
+        return self.readonly.trace_call_path(path, symbol)
 
     def preview_write(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Validate a write request and return its exact approval envelope."""
@@ -220,8 +237,33 @@ class AgentExecutor:
         return payload
 
     def inspect_diff(self) -> dict[str, Any]:
-        """检查工作区 diff。"""
-        result = self._run_git(["git", "diff", "--no-ext-diff", "--"], stdin=None)
+        """仅返回仓库读取策略允许的未暂存文件差异。"""
+        names = self._run_git(
+            ["git", "diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--"],
+            stdin=None,
+        )
+        if names.returncode != 0:
+            return command_result_to_dict(names, self.safety)
+        tracked = self._run_git(["git", "ls-files", "--stage", "-z", "--"], stdin=None)
+        if tracked.returncode != 0:
+            return command_result_to_dict(tracked, self.safety)
+        tracked_symlinks = {
+            record.partition("\t")[2]
+            for record in tracked.stdout.split("\0")
+            if record.startswith("120000 ") and "\t" in record
+        }
+        safe_paths: list[str] = []
+        for relative in names.stdout.split("\0"):
+            if not relative:
+                continue
+            candidate = Path(relative)
+            if candidate.is_absolute() or ".." in candidate.parts or relative in tracked_symlinks:
+                continue
+            if should_skip(self.repo_path / candidate, self.repo_path):
+                continue
+            safe_paths.append(f":(literal){relative}")
+        command = ["git", "diff", "--no-renames", "--no-ext-diff", "--no-textconv", "--", *safe_paths]
+        result = self._run_git(command, stdin=None) if safe_paths else CommandResult(command, 0, "", "")
         return command_result_to_dict(result, self.safety)
 
     def rollback_snapshot(self, snapshot_id: str) -> dict[str, Any]:

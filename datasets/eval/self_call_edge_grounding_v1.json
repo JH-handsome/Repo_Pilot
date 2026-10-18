@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "repo_id": "repo-pilot",
+  "cases": [
+    {"id": "self-readonly-related-edge", "source_symbol": "inspect", "target_symbol": "candidate_call_edges"},
+    {"id": "self-ask-neighbor-expansion", "source_symbol": "retrieve_for_ask", "target_symbol": "expand_with_neighbor_chunks"},
+    {"id": "self-agent-provider-ask-delegation", "source_symbol": "build_hybrid_search_provider.search", "target_symbol": "retrieve_for_ask"},
+    {"id": "self-capability-retrieval-metrics", "source_symbol": "main", "target_symbol": "evaluate_retrieval"}
+  ]
+}

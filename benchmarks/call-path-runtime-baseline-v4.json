@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "benchmark": "explicit_call_path_runtime_contract",
+  "datasets": [
+    {
+      "name": "multirepo_call_path_holdout.jsonl",
+      "sha256": "ca750f1e8855ea4cb684d6350334abd1719d47cfbd5c18f152933c3a7531d02d"
+    },
+    {
+      "name": "multirepo_call_path_transfer.jsonl",
+      "sha256": "c1d49c3abe51cb086e2d5433d80d5b162d1a24674e318f710e035216d784a77a"
+    }
+  ],
+  "manifest": {
+    "name": "multirepo_manifest.json",
+    "sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e"
+  },
+  "repositories": [
+    {
+      "id": "django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "remote": "github.com/django/django"
+    },
+    {
+      "id": "leetcode-python",
+      "commit": "87fd47d0fba0e5f26f399dd3d9162eef430cc773",
+      "remote": "github.com/cnkyrpsgl/leetcode"
+    }
+  ],
+  "config": {
+    "top_k": 5,
+    "chunk_size": 40,
+    "overlap": 5,
+    "recall_window": 2,
+    "max_recall_results": null,
+    "min_final_score": 0.0,
+    "graph_weight": 0.0,
+    "path_weight": 0.25,
+    "exclude_roots": [
+      "data",
+      "datasets",
+      "artifacts"
+    ]
+  },
+  "retriever": "hybrid-bm25-v7",
+  "policy": "first-query-callable-search-definition-unique-edge-read-both-v3",
+  "evaluation_mode": "offline_scripted_runtime_not_model_capability",
+  "metrics": {
+    "case_count": 8,
+    "contract_success_rate": 1.0,
+    "all_gold_read_rate": 1.0,
+    "source_call_observed_rate": 1.0,
+    "target_definition_observed_rate": 1.0,
+    "all_gold_cited_rate": 1.0,
+    "citation_valid_rate": 1.0,
+    "terminal_success_rate": 1.0
+  },
+  "cases": [
+    {
+      "id": "django-mail-message-holdout",
+      "entry_symbol_from_query": "send_mail",
+      "selected_entry": "django/core/mail/__init__.py",
+      "selected_target": "django/core/mail/message.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/core/mail/__init__.py",
+        "django/core/mail/message.py"
+      ],
+      "gold_files": [
+        "django/core/mail/__init__.py",
+        "django/core/mail/message.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-login-view-holdout",
+      "entry_symbol_from_query": "LoginView.form_valid",
+      "selected_entry": "django/contrib/auth/views.py",
+      "selected_target": "django/contrib/auth/__init__.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/contrib/auth/views.py",
+        "django/contrib/auth/__init__.py"
+      ],
+      "gold_files": [
+        "django/contrib/auth/__init__.py",
+        "django/contrib/auth/views.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-fetch-cache-holdout",
+      "entry_symbol_from_query": "FetchFromCacheMiddleware.process_request",
+      "selected_entry": "django/middleware/cache.py",
+      "selected_target": "django/utils/cache.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/middleware/cache.py",
+        "django/utils/cache.py"
+      ],
+      "gold_files": [
+        "django/middleware/cache.py",
+        "django/utils/cache.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-static-file-holdout",
+      "entry_symbol_from_query": "serve",
+      "selected_entry": "django/views/static.py",
+      "selected_target": "django/http/response.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/views/static.py",
+        "django/http/response.py"
+      ],
+      "gold_files": [
+        "django/http/response.py",
+        "django/views/static.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-sitemap-site-transfer",
+      "entry_symbol_from_query": "index",
+      "selected_entry": "django/contrib/sitemaps/views.py",
+      "selected_target": "django/contrib/sites/shortcuts.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/contrib/sitemaps/views.py",
+        "django/contrib/sites/shortcuts.py"
+      ],
+      "gold_files": [
+        "django/contrib/sitemaps/views.py",
+        "django/contrib/sites/shortcuts.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-sitemap-response-transfer",
+      "entry_symbol_from_query": "sitemap",
+      "selected_entry": "django/contrib/sitemaps/views.py",
+      "selected_target": "django/template/response.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/contrib/sitemaps/views.py",
+        "django/template/response.py"
+      ],
+      "gold_files": [
+        "django/contrib/sitemaps/views.py",
+        "django/template/response.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-default-404-template-transfer",
+      "entry_symbol_from_query": "page_not_found",
+      "selected_entry": "django/views/defaults.py",
+      "selected_target": "django/template/loader.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/views/defaults.py",
+        "django/template/loader.py"
+      ],
+      "gold_files": [
+        "django/template/loader.py",
+        "django/views/defaults.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    },
+    {
+      "id": "django-handler-log-transfer",
+      "entry_symbol_from_query": "response_for_exception",
+      "selected_entry": "django/core/handlers/exception.py",
+      "selected_target": "django/utils/log.py",
+      "tool_sequence": [
+        "search_code",
+        "trace_call_path",
+        "read_file",
+        "read_file"
+      ],
+      "read_paths": [
+        "django/core/handlers/exception.py",
+        "django/utils/log.py"
+      ],
+      "gold_files": [
+        "django/core/handlers/exception.py",
+        "django/utils/log.py"
+      ],
+      "read_gold_coverage": 1.0,
+      "all_gold_read": true,
+      "source_call_observed": true,
+      "target_definition_observed": true,
+      "citation_valid": true,
+      "all_gold_cited": true,
+      "terminal_success": true,
+      "contract_success": true
+    }
+  ]
+}

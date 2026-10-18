@@ -3,7 +3,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from coding_rag.agent.runtime import UnifiedRunConfig, resume_unified_query, run_unified_query
+from coding_rag.agent.runtime import (
+    UnifiedRunConfig, build_unified_messages, compact_tool_result, resume_unified_query, run_unified_query,
+)
 from coding_rag.agent.snapshots import SnapshotStore
 from coding_rag.agent.safety import AgentSafetyPolicy
 from coding_rag.rag.trace import render_trace_report
@@ -33,6 +35,46 @@ def decision(**payload):
 
 
 class UnifiedRuntimeTest(unittest.TestCase):
+    def test_unified_prompt_infers_intent_without_keyword_routing(self):
+        messages = build_unified_messages("解释这个模块", UnifiedRunConfig())
+        system = messages[0]["content"]
+        self.assertIn("根据用户的完整请求和当前工具观察判断意图", system)
+        self.assertIn("问答或定位只读取证据", system)
+        self.assertIn("写工具总是按调用逐次申请批准", system)
+
+    def test_tool_compaction_never_exceeds_character_budget(self):
+        payload = {"output": ('\\"' * 3000) + ("数据" * 3000)}
+        for budget in (1, 2, 20, 80, 300):
+            with self.subTest(budget=budget):
+                compact, metadata = compact_tool_result("run_command", payload, max_chars=budget)
+                actual = len(json.dumps(compact, ensure_ascii=False))
+                self.assertLessEqual(actual, budget)
+                self.assertEqual(metadata["returned_chars"], actual)
+                self.assertTrue(metadata["output_truncated"])
+        with self.assertRaises(ValueError):
+            compact_tool_result("run_command", payload, max_chars=0)
+
+    def test_compacted_read_cannot_validate_unseen_line(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app.py").write_text(
+                "\n".join(f"value_{index} = '{'x' * 80}'" for index in range(80)) + "\n",
+                encoding="utf-8",
+            )
+            client = SequenceClient([
+                decision(action="tool", answer=None, tool="read_file",
+                         arguments={"path": "app.py", "start_line": 1, "end_line": 80}),
+                decision(answer="见 app.py:1-1。"),
+            ])
+            run = run_unified_query(
+                "读取代码", UnifiedRunConfig(repo_path=root, max_context_chars=1000,
+                                            trace_db_path=None), client,
+            )
+
+        self.assertTrue(run.observations[0]["output_truncated"])
+        self.assertEqual(run.observations[0]["output"]["text"], "")
+        self.assertIn("无效引用: app.py:1-1", run.answer)
+
     def test_direct_answer_does_not_call_tools(self):
         client = SequenceClient([decision(answer="你好")])
 
@@ -83,6 +125,37 @@ class UnifiedRuntimeTest(unittest.TestCase):
             ["model_decision", "search_code", "model_decision", "final_answer"],
         )
         self.assertFalse(run.trace["events"][-1]["output_summary"]["citation_issues"])
+
+    def test_separate_agent_runs_reuse_repository_index_and_trace_cache_status(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app.py").write_text(
+                "def target():\n    return True\n",
+                encoding="utf-8",
+            )
+            config = UnifiedRunConfig(repo_path=root, top_k=1, recall_window=0)
+
+            def run_once():
+                client = SequenceClient([
+                    decision(
+                        action="tool",
+                        answer=None,
+                        tool="search_code",
+                        arguments={"query": "target", "top_k": 1},
+                    ),
+                    decision(answer="定义位于 app.py:1-2。"),
+                ])
+                return run_unified_query("target 在哪里定义？", config, client)
+
+            first = run_once()
+            second = run_once()
+
+        first_index = first.trace["artifacts"]["retrieval"]["searches"][0]["artifacts"]["index"]
+        second_index = second.trace["artifacts"]["retrieval"]["searches"][0]["artifacts"]["index"]
+        self.assertEqual(first_index["status"], "miss")
+        self.assertGreater(first_index["index_build_ms"], 0)
+        self.assertEqual(second_index["status"], "hit")
+        self.assertEqual(second_index["index_build_ms"], 0)
 
     def test_patch_requires_approval_and_lists_files_by_default(self):
         patch_text = (

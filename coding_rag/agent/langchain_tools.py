@@ -14,10 +14,11 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-READONLY_LANGCHAIN_TOOL_NAMES = ("search_code", "read_file")
+READONLY_LANGCHAIN_TOOL_NAMES = ("search_code", "read_file", "trace_call_path")
 AGENT_LANGCHAIN_TOOL_NAMES = (
     "search_code",
     "read_file",
+    "trace_call_path",
     "apply_patch",
     "run_command",
     "inspect_diff",
@@ -77,6 +78,13 @@ class ReadFileInput(ReadOnlyToolInput):
         return self
 
 
+class TraceCallPathInput(ReadOnlyToolInput):
+    """Exact Python symbol to trace after a file has been located."""
+
+    path: str = Field(min_length=1, description="Repository-relative Python file path.")
+    symbol: str = Field(min_length=1, description="Exact function or Class.method name.")
+
+
 class ApplyPatchInput(ReadOnlyToolInput):
     """代码补丁工具的参数约束。"""
 
@@ -108,7 +116,7 @@ class InspectDiffInput(ReadOnlyToolInput):
 def build_readonly_langchain_tool_map(
     executor: _ToolExecutor,
 ) -> dict[str, StructuredTool]:
-    """构建只读运行时允许使用的两个 LangChain 工具。"""
+    """构建只读运行时允许使用的 LangChain 工具。"""
     if executor is None:
         raise ValueError("executor is required")
 
@@ -131,6 +139,10 @@ def build_readonly_langchain_tool_map(
             },
         )
 
+    def trace_call_path(path: str, symbol: str) -> Any:
+        """Trace syntactically resolvable Python calls without executing repository code."""
+        return executor.call("trace_call_path", {"path": path, "symbol": symbol})
+
     tools = [
         StructuredTool.from_function(
             func=search_code,
@@ -150,6 +162,17 @@ def build_readonly_langchain_tool_map(
                 "to an inclusive line range."
             ),
             args_schema=ReadFileInput,
+            infer_schema=False,
+        ),
+        StructuredTool.from_function(
+            func=trace_call_path,
+            name="trace_call_path",
+            description=(
+                "Trace static calls from an exact Python function or Class.method in one "
+                "repository file. Returns source and target line locations, not source text; "
+                "use read_file to verify dynamic behavior and cite evidence."
+            ),
+            args_schema=TraceCallPathInput,
             infer_schema=False,
         ),
     ]

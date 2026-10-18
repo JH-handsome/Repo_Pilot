@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "suite_id": "repopilot-patch-outcome-v1",
+  "evaluation_mode": "patch_outcome_harness_not_llm_intelligence",
+  "tasks": [
+    {
+      "id": "slugify-mixed-whitespace",
+      "fixture_path": "datasets/patch_outcome/slugify_v1",
+      "fixture_identity": "52fff5f0185bdcb1fd882dfd1b11a04b22c0fb6e6fda184b8cae3d8a0fb78b6b",
+      "requirement": "Make slugify collapse every run of mixed whitespace into one dash while preserving lowercase output.",
+      "allowed_paths": ["text_utils.py"],
+      "forbidden_paths": ["README.md", "tests/test_text_utils.py"],
+      "test_command": ["python", "-m", "unittest", "tests.test_text_utils"],
+      "timeout_seconds": 10,
+      "gold_patch": "datasets/patch_outcome/oracle/slugify.patch"
+    },
+    {
+      "id": "mean-preserves-fractions",
+      "fixture_path": "datasets/patch_outcome/mean_v1",
+      "fixture_identity": "9c59520ce34edb878dc90f89227c7348feb5cbaefdcc46745d48b16fe88ba9da",
+      "requirement": "Make mean return the exact arithmetic mean instead of truncating fractional results.",
+      "allowed_paths": ["stats_utils.py"],
+      "forbidden_paths": ["README.md", "tests/test_stats_utils.py"],
+      "test_command": ["python", "-m", "unittest", "tests.test_stats_utils"],
+      "timeout_seconds": 10,
+      "gold_patch": "datasets/patch_outcome/oracle/mean.patch"
+    }
+  ]
+}

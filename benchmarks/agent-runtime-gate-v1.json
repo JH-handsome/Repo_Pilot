@@ -1,0 +1,18 @@
+{
+  "max_drop": {
+    "contract_score": 2.0,
+    "metrics.search_hit_at_5": 0.02,
+    "metrics.search_mrr_at_5": 0.03,
+    "metrics.selected_file_hit_at_1": 0.03,
+    "metrics.read_file_hit_at_1": 0.03,
+    "metrics.tool_sequence_success": 0.0,
+    "metrics.citation_validity": 0.0,
+    "metrics.gold_citation_grounding": 0.0,
+    "metrics.memory_index_hit_rate": 0.0,
+    "metrics.terminal_success": 0.0
+  },
+  "max_ratio": {
+    "metrics.latency_ms_p95": 1.5,
+    "metrics.steps_avg": 1.0
+  }
+}

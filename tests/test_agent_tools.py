@@ -45,6 +45,67 @@ class AgentToolsTest(unittest.TestCase):
             finally:
                 outside.unlink(missing_ok=True)
 
+    def test_read_file_rejects_env_and_ignored_paths(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            (root / ".env").write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            (root / ".env.local").write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            git_dir = root / ".git"
+            git_dir.mkdir()
+            (git_dir / "config").write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            venv_dir = root / ".venv"
+            venv_dir.mkdir()
+            (venv_dir / "secret.py").write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            tools = ReadOnlyAgentTools(root)
+
+            for path in (".env", ".env.local", ".git/config", ".venv/secret.py"):
+                with self.subTest(path=path), self.assertRaises(AgentToolError):
+                    tools.read_file(path)
+
+            self.assertNotIn(".env", tools.list_files("*"))
+            self.assertNotIn(".env.local", tools.list_files("*"))
+
+    def test_credential_named_files_are_not_readable_or_searchable(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            paths = ("secrets.py", "credentials.py", "private.pem", "token.json", ".npmrc")
+            for path in paths:
+                (root / path).write_text("notrealcanary = 1\n", encoding="utf-8")
+            tools = ReadOnlyAgentTools(root)
+
+            for path in paths:
+                with self.subTest(path=path), self.assertRaises(AgentToolError):
+                    tools.read_file(path)
+                self.assertNotIn(path, tools.list_files("*"))
+            self.assertNotIn("notrealcanary", " ".join(
+                row["text"] for row in tools.search_code("notrealcanary", top_k=5)
+            ))
+
+    def test_list_files_rejects_outside_file_symlink(self):
+        with TemporaryDirectory() as temp_dir, TemporaryDirectory() as outside_dir:
+            root = make_repo(temp_dir)
+            outside = Path(outside_dir) / "outside_agent_tool_symlink.py"
+            outside.write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            link = root / "linked.py"
+            try:
+                link.symlink_to(outside)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"file symlink unavailable: {exc}")
+            self.assertNotIn("linked.py", ReadOnlyAgentTools(root).list_files("**/*.py"))
+
+    def test_read_file_rejects_symlink_alias_to_env(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            env_file = root / ".env"
+            env_file.write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            try:
+                (root / "settings.txt").symlink_to(env_file)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"file symlink unavailable: {exc}")
+
+            with self.assertRaises(AgentToolError):
+                ReadOnlyAgentTools(root).read_file("settings.txt")
+
     def test_list_files_skips_ignored_dirs(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
@@ -69,6 +130,19 @@ class AgentToolsTest(unittest.TestCase):
         self.assertEqual(matches[0]["name"], "load_data")
         self.assertEqual(matches[0]["kind"], "function")
         self.assertIn("def load_data", matches[0]["context"])
+
+    def test_inspect_symbol_exact_qualified_lookup_is_bounded(self):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "app.py").write_text(
+                "class Alpha:\n    def run(self):\n        return 1\n\n"
+                "class Beta:\n    def run(self):\n        return 2\n",
+                encoding="utf-8",
+            )
+            tools = ReadOnlyAgentTools(root)
+            matches = tools.inspect_symbol("Alpha.run", exact=True, limit=1)
+            self.assertEqual([(row["parent"], row["name"]) for row in matches], [("Alpha", "run")])
+            self.assertEqual(tools.inspect_symbol("Alpha.ru", exact=True), [])
 
     def test_call_rejects_non_readonly_tools(self):
         with TemporaryDirectory() as temp_dir:
@@ -124,6 +198,75 @@ class AgentToolsTest(unittest.TestCase):
         self.assertIn(".strip()", inspected["stdout"])
         self.assertEqual(inspected["returncode"], 0)
 
+    def test_inspect_diff_does_not_return_env_changes(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            init_git_repo(root)
+            env_file = root / ".env"
+            env_file.write_text("FAKE_OLD_VALUE\n", encoding="utf-8")
+            ignored_file = root / ".venv" / "secret.py"
+            ignored_file.parent.mkdir()
+            ignored_file.write_text("FAKE_OLD_IGNORED\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-f", ".env", ".venv/secret.py"],
+                cwd=root, check=True, capture_output=True, text=True,
+            )
+            env_file.write_text("FAKE_NEW_VALUE\n", encoding="utf-8")
+            ignored_file.write_text("FAKE_NEW_IGNORED\n", encoding="utf-8")
+            (root / "app.py").write_text("def changed():\n    return True\n", encoding="utf-8")
+
+            inspected = AgentExecutor(root).inspect_diff()
+            subprocess.run(
+                ["git", "add", "app.py"], cwd=root, check=True, capture_output=True, text=True
+            )
+            secret_only = AgentExecutor(root).inspect_diff()
+
+        self.assertEqual(inspected["returncode"], 0)
+        self.assertIn("def changed", inspected["stdout"])
+        self.assertNotIn(".env", inspected["stdout"])
+        self.assertNotIn(".venv", inspected["stdout"])
+        self.assertNotIn("FAKE_NEW_VALUE", inspected["stdout"])
+        self.assertEqual(secret_only["stdout"], "")
+
+    def test_inspect_diff_skips_deleted_tracked_symlink(self):
+        with TemporaryDirectory() as temp_dir, TemporaryDirectory() as outside_dir:
+            root = make_repo(temp_dir)
+            init_git_repo(root)
+            outside = Path(outside_dir) / "outside.py"
+            outside.write_text("FAKE_TEST_VALUE\n", encoding="utf-8")
+            link = root / "linked.py"
+            try:
+                link.symlink_to(outside)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"file symlink unavailable: {exc}")
+            subprocess.run(
+                ["git", "add", "linked.py"], cwd=root, check=True, capture_output=True, text=True
+            )
+            link.unlink()
+
+            inspected = AgentExecutor(root).inspect_diff()
+
+        self.assertEqual(inspected["returncode"], 0)
+        self.assertEqual(inspected["stdout"], "")
+
+    def test_inspect_diff_preserves_regular_file_with_spaces(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            init_git_repo(root)
+            target = root / "my module.py"
+            target.write_text("before = True\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "my module.py"], cwd=root,
+                check=True, capture_output=True, text=True,
+            )
+            target.write_text("after = True\n", encoding="utf-8")
+
+            inspected = AgentExecutor(root).inspect_diff()
+
+        self.assertEqual(inspected["returncode"], 0)
+        self.assertIn("my module.py", inspected["stdout"])
+        self.assertIn("+after = True", inspected["stdout"])
+
     def test_executor_runs_command_in_repo(self):
         with TemporaryDirectory() as temp_dir:
             root = make_repo(temp_dir)
@@ -151,6 +294,35 @@ class AgentToolsTest(unittest.TestCase):
 
             with self.assertRaises(AgentToolError):
                 executor.run_command("python -m compileall app.py && git status")
+
+    def test_executor_rejects_unsafe_allowlisted_options(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            executor = AgentExecutor(root)
+            for cmd in (
+                "rg --pre python load_data app.py",
+                "rg --pre=python load_data app.py",
+                "git diff --ext-diff",
+                "git show --textconv HEAD",
+                "git diff --output=diff.txt",
+            ):
+                with self.subTest(cmd=cmd), self.assertRaisesRegex(
+                    AgentToolError, "command option is not allowed"
+                ):
+                    executor.preview_write(
+                        "run_command", {"cmd": cmd, "affected_files": ["app.py"]}
+                    )
+
+    def test_executor_keeps_normal_search_and_git_diff_available(self):
+        with TemporaryDirectory() as temp_dir:
+            root = make_repo(temp_dir)
+            executor = AgentExecutor(root)
+            for cmd in ("rg load_data app.py", "git diff --no-ext-diff --no-textconv"):
+                with self.subTest(cmd=cmd):
+                    request = executor.preview_write(
+                        "run_command", {"cmd": cmd, "affected_files": ["app.py"]}
+                    )
+                    self.assertEqual(request["tool"], "run_command")
 
     def test_executor_rejects_parent_path_in_command_before_approval(self):
         with TemporaryDirectory() as temp_dir:

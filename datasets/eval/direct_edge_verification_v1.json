@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "purpose": "Source-audited direct-call and near-miss checks on pinned Django and Aider; static component evidence only.",
+  "cases": [
+    {"id": "django-logout", "repo_id": "django", "source_path": "django/contrib/auth/views.py", "source_symbol": "LogoutView.post", "target_path": "django/contrib/auth/__init__.py", "target_symbol": "logout", "expected": "supported_static_call"},
+    {"id": "django-logout-not-login", "repo_id": "django", "source_path": "django/contrib/auth/views.py", "source_symbol": "LogoutView.post", "target_path": "django/contrib/auth/__init__.py", "target_symbol": "login", "expected": "not_established"},
+    {"id": "django-login-not-logout", "repo_id": "django", "source_path": "django/contrib/auth/views.py", "source_symbol": "LoginView.form_valid", "target_path": "django/contrib/auth/__init__.py", "target_symbol": "logout", "expected": "not_established"},
+    {"id": "django-bad-request-template", "repo_id": "django", "source_path": "django/views/defaults.py", "source_symbol": "bad_request", "target_path": "django/template/loader.py", "target_symbol": "get_template", "expected": "supported_static_call"},
+    {"id": "django-mass-mail-message", "repo_id": "django", "source_path": "django/core/mail/__init__.py", "source_symbol": "send_mass_mail", "target_path": "django/core/mail/message.py", "target_symbol": "EmailMessage", "expected": "supported_static_call"},
+    {"id": "django-mass-mail-not-multipart", "repo_id": "django", "source_path": "django/core/mail/__init__.py", "source_symbol": "send_mass_mail", "target_path": "django/core/mail/message.py", "target_symbol": "EmailMultiAlternatives", "expected": "not_established"},
+    {"id": "django-sitemap-reverse", "repo_id": "django", "source_path": "django/contrib/sitemaps/views.py", "source_symbol": "index", "target_path": "django/urls/base.py", "target_symbol": "reverse", "expected": "supported_static_call"},
+    {"id": "django-sitemap-not-render", "repo_id": "django", "source_path": "django/contrib/sitemaps/views.py", "source_symbol": "index", "target_path": "django/template/loader.py", "target_symbol": "render_to_string", "expected": "not_established"},
+    {"id": "aider-map-important", "repo_id": "aider", "source_path": "aider/repomap.py", "source_symbol": "RepoMap.get_ranked_tags_map_uncached", "target_path": "aider/special.py", "target_symbol": "filter_important_files", "expected": "supported_static_call"},
+    {"id": "aider-map-not-direct-important", "repo_id": "aider", "source_path": "aider/repomap.py", "source_symbol": "RepoMap.get_repo_map", "target_path": "aider/special.py", "target_symbol": "filter_important_files", "expected": "not_established"},
+    {"id": "aider-linter-subprocess", "repo_id": "aider", "source_path": "aider/linter.py", "source_symbol": "Linter.run_cmd", "target_path": "aider/run_cmd.py", "target_symbol": "run_cmd_subprocess", "expected": "supported_static_call"},
+    {"id": "aider-lint-not-direct-subprocess", "repo_id": "aider", "source_path": "aider/linter.py", "source_symbol": "Linter.lint", "target_path": "aider/run_cmd.py", "target_symbol": "run_cmd_subprocess", "expected": "not_established"},
+    {"id": "aider-reasoning-strip", "repo_id": "aider", "source_path": "aider/coders/base_coder.py", "source_symbol": "Coder.remove_reasoning_content", "target_path": "aider/reasoning_tags.py", "target_symbol": "remove_reasoning_content", "expected": "supported_static_call"},
+    {"id": "aider-other-method-not-strip", "repo_id": "aider", "source_path": "aider/coders/base_coder.py", "source_symbol": "Coder.get_repo_map", "target_path": "aider/reasoning_tags.py", "target_symbol": "remove_reasoning_content", "expected": "not_established"}
+  ]
+}

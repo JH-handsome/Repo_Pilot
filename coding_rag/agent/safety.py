@@ -56,6 +56,11 @@ DEFAULT_DENIED_COMMAND_PREFIXES: tuple[tuple[str, ...], ...] = (
 SHELL_META_PATTERN = re.compile(r"&&|\|\||[;&|<>`]|\$\(|\r|\n")
 WINDOWS_ABSOLUTE_PATTERN = re.compile(r"^[A-Za-z]:[/\\]")
 MAX_TIMEOUT_SECONDS = 300
+EXECUTING_COMMAND_OPTIONS: dict[str, frozenset[str]] = {
+    # These options can start another process or write undeclared files despite shell=False.
+    "rg": frozenset({"--pre", "--pre-glob"}),
+    "git": frozenset({"--ext-diff", "--textconv", "--output"}),
+}
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,14 @@ class AgentSafetyGuard:
         allowed = matching_prefix(normalized, self.policy.allowlist)
         if not allowed:
             return SafetyDecision(False, "command is not in the allowlist", None)
+
+        unsafe_option = find_executing_command_option(normalized)
+        if unsafe_option is not None:
+            return SafetyDecision(
+                False,
+                f"command option is not allowed by safety policy: {unsafe_option}",
+                "unsafe-command-option",
+            )
 
         escaped_path = find_outside_repo_command_path(args, repo_path)
         if escaped_path is not None:
@@ -223,6 +236,17 @@ def matching_prefix(
 def command_rule_name(prefix: tuple[str, ...]) -> str:
     """将命令-规则令牌元组合并为其显示名称。"""
     return " ".join(prefix)
+
+
+def find_executing_command_option(args: list[str]) -> str | None:
+    """Reject allowlisted commands' flags that can execute tools or write undeclared files."""
+    if not args:
+        return None
+    for arg in args[1:]:
+        option = arg.split("=", 1)[0]
+        if option in EXECUTING_COMMAND_OPTIONS.get(args[0], frozenset()):
+            return option
+    return None
 
 
 def find_outside_repo_command_path(

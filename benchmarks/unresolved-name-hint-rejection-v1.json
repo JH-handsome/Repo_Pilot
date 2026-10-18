@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "evaluation_mode": "offline_component_diagnostic_not_model_behavior",
+  "repository": {
+    "id": "aider",
+    "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c"
+  },
+  "inputs": {
+    "source_anchors": "datasets/eval/aider_call_edge_source_anchors_v1.json",
+    "positive_source": "aider/commands.py:Commands.cmd_lint",
+    "negative_case_count": 8
+  },
+  "experiment": "For unresolved dotted calls with at least three name parts, match the penultimate receiver spelling to one unique indexed Class.method name, ignoring underscores and case. No type or runtime binding is proven.",
+  "observations": {
+    "positive": {
+      "call": "self.coder.linter.lint",
+      "source_line": 379,
+      "target_name_match": "aider/linter.py:Linter.lint",
+      "target_hint_rank": 3,
+      "hint_count": 4
+    },
+    "negative_controls": {
+      "cases_with_cross_file_hints": 1,
+      "case_count": 8,
+      "misleading_case": "aider-coder-mentioned-identifiers-same-file",
+      "suggested_target": "aider/repomap.py:RepoMap.get_repo_map",
+      "duplicate_call_site_hints": 3
+    }
+  },
+  "decision": "Rejected. A real cross-file call can still be irrelevant to the user's same-file question, so unique name matching is not a safe automatic answer or default navigation signal. Keep the original unresolved call sites and require source reading plus explicit symbol lookup.",
+  "limitations": "This small revealed anchor set is a component diagnostic, not a blind generalization test. The rejected heuristic was removed from runtime code."
+}

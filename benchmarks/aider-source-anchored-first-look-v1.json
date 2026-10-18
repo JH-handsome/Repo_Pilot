@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "label": "oracle_source_anchor_component_diagnostic_not_end_to_end_agent_accuracy",
+  "candidate_version": "call-edge-candidates-v1",
+  "repository_commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+  "repository_fingerprint": "2abb959a5c51d4b8520071e27016bb3b7b888ff31d42f4948d8af8a209ec0ef5",
+  "manifest_sha256": "cf46b5d4ec58cd9b259fc5282b46de7ee1d74b73f55f2e4339040dcba40d1363",
+  "anchors_sha256": "6f7cda04fd6d49c07a32650ddde55c20d1277e99841a56dca6ce78fe1eaad459",
+  "grounding_sha256": "e9e21d733c8d02eb22f99aa49f32b2f433ec8f9f88af86f5abe60779e4a615b6",
+  "datasets": {
+    "aider_call_edge_positive_v1.jsonl": "49c5d8abf9386dd24113b28bca7ae159328efdb859c9387a2d078a3bcdb01a22",
+    "aider_call_edge_negative_v1.jsonl": "119ed26a94836c816739b96c2975055aab4838fb77f0dfecfb51a4e0e17c4f7b",
+    "aider_call_edge_near_negative_v1.jsonl": "bd617d1a157b62a628808a3a7c233bce2ef1e405476329d74e339f9687db76a2"
+  },
+  "config": {"top_k": 5, "source_files": 1, "line_weight": 1.0, "candidate_mode": "source_anchored"},
+  "positive_case_count": 4,
+  "exact_edge_at_1": 4,
+  "exact_edge_at_3": 4,
+  "negative_case_count": 8,
+  "negative_suggestion_at_1": 1,
+  "negative_abstention_count": 7,
+  "remaining_misleading_case": "aider-main-config-yes-same-file",
+  "interpretation": "The exact source file and function were supplied from labels. These results isolate outgoing-edge ranking and do not measure automatic source discovery or answer quality."
+}

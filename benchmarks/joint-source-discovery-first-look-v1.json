@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "benchmark": "joint_file_symbol_candidate_diagnostic",
+  "evaluation_mode": "offline_query_only_candidates_gold_used_after_generation",
+  "command": "python scripts/source_discovery_eval.py --out <scorecard.json>",
+  "retriever": "hybrid-bm25-v7",
+  "symbol_locator": "file-local-symbol-v1",
+  "repo_commits": {
+    "aider": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+    "django": "09fdc06346b167ff6231a4cb80b85ae67b53c715"
+  },
+  "case_count": 20,
+  "candidate_policy": "first 5 retrieval results, up to 3 ranked function definitions per distinct file",
+  "gold_pair_in_candidates": 0.9,
+  "first_file_first_symbol_pair_accuracy": 0.5,
+  "by_repo": {
+    "aider": {"cases": 12, "gold_pair_in_candidates": 0.8333333333333334, "first_pair_accuracy": 0.6666666666666666},
+    "django": {"cases": 8, "gold_pair_in_candidates": 1.0, "first_pair_accuracy": 0.25}
+  },
+  "limitations": "All cases are authored and revealed. Candidate inclusion is not answer correctness. A single first-pair decision fails half the cases and is not enabled in the default Agent. No live model was called."
+}

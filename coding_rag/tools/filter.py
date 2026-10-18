@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from coding_rag.tools.bm25 import BM25Retriever, SearchResult
+from coding_rag.tools.bm25 import BM25Retriever, SearchResult, normalize_path
 
 
 def filter_recalled_results(
@@ -14,6 +14,7 @@ def filter_recalled_results(
     retriever: BM25Retriever,
     final_k: int | None,
     min_score: float | None = None,
+    scores: list[float] | None = None,
 ) -> list[SearchResult]:
     """
     对召回的代码块重新评分并保留最相关的最终上下文
@@ -38,7 +39,7 @@ def filter_recalled_results(
         return []
 
     # 基于原始查询重新评分召回的结果
-    rescored_results = retriever.rescore_results(query, recalled_results)
+    rescored_results = retriever.rescore_results(query, recalled_results, scores=scores)
     # 为每个结果添加索引，保持召回顺序
     indexed_results = list(enumerate(rescored_results))
 
@@ -57,7 +58,25 @@ def filter_recalled_results(
 
     if final_k is None:
         return final_results
-    return final_results[:final_k]
+    return diversify_final_results(final_results, final_k)
+
+
+def diversify_final_results(results: list[SearchResult], final_k: int) -> list[SearchResult]:
+    """Prefer distinct files before filling remaining slots with extra chunks."""
+    selected: list[SearchResult] = []
+    deferred: list[SearchResult] = []
+    selected_files: set[str] = set()
+    for result in results:
+        file_key = normalize_path(result.chunk.file_path)
+        if file_key in selected_files:
+            deferred.append(result)
+            continue
+        selected.append(result)
+        selected_files.add(file_key)
+        if len(selected) == final_k:
+            return selected
+    selected.extend(deferred[: max(0, final_k - len(selected))])
+    return selected
 
 
 def sort_key(index_and_result: tuple[int, SearchResult]) -> tuple[float, int, int]:

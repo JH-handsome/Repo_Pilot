@@ -13,6 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from coding_rag.storage.artifacts import write_json_artifact
+
 from coding_rag.tools.bm25 import BM25Retriever, SearchResult
 from coding_rag.repository.chunks import split_python_files
 from coding_rag.tools.recall import expand_with_neighbor_chunks
@@ -23,6 +25,7 @@ from coding_rag.tools.filter import filter_recalled_results
 from coding_rag.rag.answer_generator import AnswerGenerator, build_generator
 from coding_rag.rag.prompt import GenerationMode
 from coding_rag.rag.trace import build_retrieval_trace, get_retrieval_stages
+from coding_rag.evaluation.retrieval import PreparedRetrievalPipeline, RetrievalEvalConfig
 
 
 @dataclass
@@ -129,16 +132,19 @@ def generate_eval_answer(
         return {"answer": "", "error": str(error)}
 
 
-def pipeline(repo_path: str, query: str, top_k: int, chunk_size: int, overlap: int, recall_window: int) -> tuple[list[SearchResult], list[SearchResult], list[SearchResult]]:
+def pipeline(repo_path: str, query: str, top_k: int, chunk_size: int, overlap: int, recall_window: int, prepared: PreparedRetrievalPipeline | None = None) -> tuple[list[SearchResult], list[SearchResult], list[SearchResult]]:
     """检索流水线，依次执行初搜、邻居召回与最终过滤三个阶段的检索。
 
     加载仓库 Python 文件并切块，BM25 初搜得到种子；
     按召回窗口扩展邻居块；重排序过滤后截取 top_k。
     返回 (初搜结果, 邻居召回结果, 最终过滤结果) 三元组。
     """
-    python_files = load_python_files(repo_path)
-    chunks = split_python_files(python_files, chunk_size=chunk_size, overlap=overlap)
-    retriever = BM25Retriever(chunks)
+    prepared = prepared or PreparedRetrievalPipeline.build(RetrievalEvalConfig(
+        repo_path=Path(repo_path), top_k=top_k, chunk_size=chunk_size,
+        overlap=overlap, recall_window=recall_window,
+    ))
+    chunks = prepared.chunks
+    retriever = prepared.retriever
     seed = retriever.search(query, top_k=top_k)
     recalled = expand_with_neighbor_chunks(
         chunks,
@@ -532,7 +538,7 @@ def write_json(path: str | Path, data: dict) -> None:
     """
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_artifact(output_path, data)
 
 
 def write_jsonl(path: str | Path, rows: list[dict]) -> None:
@@ -542,10 +548,7 @@ def write_jsonl(path: str | Path, rows: list[dict]) -> None:
     """
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
-        encoding="utf-8",
-    )
+    write_json_artifact(output_path, rows, jsonl=True)
 
 
 def run_eval(args: argparse.Namespace) -> int:
@@ -570,6 +573,11 @@ def run_eval(args: argparse.Namespace) -> int:
 
     per_case: list[dict] = []
     stage_file_records: list[dict] = []
+    prepared = PreparedRetrievalPipeline.build(RetrievalEvalConfig(
+        repo_path=Path(args.repo_path), top_k=args.top_k,
+        chunk_size=args.chunk_size, overlap=args.overlap,
+        recall_window=args.recall_window,
+    ))
     for case in cases:
         seed, recalled, final = pipeline(
             repo_path=args.repo_path,
@@ -578,6 +586,7 @@ def run_eval(args: argparse.Namespace) -> int:
             chunk_size=args.chunk_size,
             overlap=args.overlap,
             recall_window=args.recall_window,
+            prepared=prepared,
         )
         rr, recall_at_k, hit_count = mrr_and_recall_at_k(final, case.relevant, args.top_k, path_roots)
         bad = analyze_bad_case(seed, recalled, final, case.relevant, args.top_k, path_roots)

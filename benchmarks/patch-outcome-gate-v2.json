@@ -1,0 +1,17 @@
+{
+  "max_drop": {
+    "score": 0.0,
+    "metrics.harness_valid_rate": 0.0,
+    "metrics.pristine_pass_rate": 0.0,
+    "metrics.initial_failure_rate": 0.0,
+    "metrics.patch_applied_rate": 0.0,
+    "metrics.test_pass_rate": 0.0,
+    "metrics.allowed_path_precision": 0.0,
+    "metrics.forbidden_untouched_rate": 0.0,
+    "metrics.minimality_score": 0.0
+  },
+  "max_increase": {
+    "metrics.timeout_rate": 0.0,
+    "metrics.changed_files_avg": 0.0
+  }
+}

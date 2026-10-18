@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "benchmark": "exact_indexed_definition_absence_guard",
+  "evaluation_mode": "offline_ast_guard_not_model_abstention",
+  "retriever": "hybrid-bm25-v7",
+  "symbol_locator": "file-local-symbol-v1",
+  "guard_version": "exact-direct-definition-v1",
+  "dataset": {
+    "name": "discovery_explicit_missing_v1.json",
+    "sha256": "7e99e5bf9c7d67ed3e392603c2deb5645d8da155ddf5d9a80a862ffd09eb22c0"
+  },
+  "repositories": [
+    {
+      "repo": "aider",
+      "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+      "manifest_sha256": "cf46b5d4ec58cd9b259fc5282b46de7ee1d74b73f55f2e4339040dcba40d1363"
+    },
+    {
+      "repo": "django",
+      "commit": "09fdc06346b167ff6231a4cb80b85ae67b53c715",
+      "manifest_sha256": "83f2a075cbf94186b6ddb213e53b071c10efc93f4be10e87c20031fbdbe8340e"
+    }
+  ],
+  "metrics": {
+    "negative_count": 8,
+    "positive_control_count": 20,
+    "negative_abstention_rate": 1.0,
+    "negative_missing_warning_rate": 1.0,
+    "positive_false_abstention_rate": 0.0
+  },
+  "limitations": "Authored and revealed exact-qualified-name cases only; no claim about natural-language absence, inheritance, dynamic methods, model reasoning, or answer quality."
+}

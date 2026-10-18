@@ -346,7 +346,7 @@ def run_frontend_query(
         repo_path=repo_path,
         top_k=int(payload.get("top_k") or 5),
         recall_window=int(payload.get("recall_window") or 2),
-        generation_mode=GenerationMode(str(payload.get("mode") or "judge")),
+        generation_mode=GenerationMode.JUDGE,
         max_context_chars=int(payload.get("max_context_chars") or 12000),
         agent_policy_path=empty_to_none(payload.get("agent_policy")),
         trace_db_path=trace_db_path,
@@ -616,17 +616,17 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
   </header>
   <main>
     <section class="controls">
-      <label for="appMode">使用模式</label>
+      <label for="appMode">使用方式</label>
       <select id="appMode">
-        <option value="ask">代码问答</option>
+        <option value="auto">自动识别任务</option>
         <option value="learning">项目学习</option>
       </select>
       <label for="repo">仓库路径</label>
       <input id="repo" value="." />
-      <div id="askControls">
+      <div id="taskControls">
         <button id="newConversation" type="button">新对话</button>
         <label for="query">问题或需求</label>
-        <textarea id="query" placeholder="例如：解释 BM25 索引流程，或修复 ASK 没有调用 LLM 的问题"></textarea>
+        <textarea id="query" placeholder="例如：解释 BM25 索引流程，或修复一个具体问题"></textarea>
       </div>
       <div id="learningControls" class="hidden">
         <label for="learningGoal">学习目标</label>
@@ -664,16 +664,6 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
             <option>custom</option>
           </select>
         </div>
-        <div id="answerModeField">
-          <label for="mode">回答风格</label>
-          <select id="mode">
-            <option value="judge">judge</option>
-            <option value="code-understand">code-understand</option>
-            <option value="code-generate">code-generate</option>
-            <option value="api">api</option>
-            <option value="leetcode">leetcode</option>
-          </select>
-        </div>
       </div>
       <div class="mode-note" id="writePolicyNote">写工具会逐调用列出文件并等待一次性批准。</div>
       <button id="run">运行</button>
@@ -688,11 +678,10 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
     const outputEl = document.getElementById("output");
     const runBtn = document.getElementById("run");
     const appMode = document.getElementById("appMode");
-    const askControls = document.getElementById("askControls");
+    const taskControls = document.getElementById("taskControls");
     const learningControls = document.getElementById("learningControls");
     const learningSubmitControls = document.getElementById("learningSubmitControls");
     const learningReflectControls = document.getElementById("learningReflectControls");
-    const answerModeField = document.getElementById("answerModeField");
     const topKInput = document.getElementById("topK");
     let requestInFlight = false;
     let learningSession = null;
@@ -751,10 +740,10 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
 
     function runTask() {
       if (appMode.value === "learning") return runLearningTask();
-      return runAskTask();
+      return runUnifiedTask();
     }
 
-    async function runAskTask() {
+    async function runUnifiedTask() {
       if (requestInFlight) return;
       requestInFlight = true;
       appMode.disabled = true;
@@ -769,7 +758,6 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
           top_k: Number(value("topK")),
           recall_window: Number(value("recall")),
           provider: value("provider"),
-          mode: value("mode"),
         };
         const response = await fetch("/api/run", {
           method: "POST",
@@ -778,21 +766,21 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.error || `请求失败 (${response.status})`);
-        if (appMode.value === "ask") {
+        if (appMode.value === "auto") {
           renderRun(data);
           statusEl.textContent = data.status === "approval_required"
             ? "等待批准"
             : (data.status === "failed" ? "失败" : "完成");
         }
       } catch (error) {
-        if (appMode.value === "ask") {
+        if (appMode.value === "auto") {
           outputEl.innerHTML = `<div class="block"><h2>执行失败</h2><pre>${escapeHtml(error.message)}</pre></div>`;
           statusEl.textContent = "失败";
         }
       } finally {
         requestInFlight = false;
         appMode.disabled = false;
-        if (appMode.value === "ask") runBtn.disabled = false;
+        if (appMode.value === "auto") runBtn.disabled = false;
         else syncLearningControls();
       }
     }
@@ -939,9 +927,8 @@ INDEX_HTML_TEMPLATE = r"""<!doctype html>
 
     function updateMode() {
       const isLearning = appMode.value === "learning";
-      askControls.classList.toggle("hidden", isLearning);
+      taskControls.classList.toggle("hidden", isLearning);
       learningControls.classList.toggle("hidden", !isLearning);
-      answerModeField.classList.toggle("hidden", isLearning);
       document.getElementById("writePolicyNote").classList.toggle("hidden", isLearning);
       topKInput.max = isLearning ? "20" : "50";
       if (isLearning && Number(topKInput.value) > 20) topKInput.value = "20";

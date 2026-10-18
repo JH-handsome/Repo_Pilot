@@ -5,24 +5,14 @@ import unittest
 
 from coding_rag.agent.planner import (
     AgentPlanConfig,
-    AskModeConfig,
     ReActAgentInterface,
     WorkflowMode,
-    build_ask_messages,
     classify_task,
     default_agent_tools,
     render_agent_plan_prompt,
     render_agent_plan_run,
     run_agent_plan_mode,
-    run_ask_mode,
 )
-from coding_rag.rag.prompt import GenerationMode
-
-
-class DummyClient:
-    def complete(self, messages):
-        self.messages = messages
-        return "## Relevant code\n- app.py:1-2\n\n## Answer\nload_data reads files."
 
 
 class DummyPlanClient:
@@ -61,52 +51,23 @@ class DummyPlanClient:
 
 
 class TaskPlannerTest(unittest.TestCase):
-    def test_classify_question_as_ask(self):
+    def test_question_uses_unified_agent(self):
         plan = classify_task("Where does load_data read files?")
 
-        self.assertEqual(plan.mode, WorkflowMode.ASK)
-        self.assertEqual(plan.intent, "code_question_answering")
-        self.assertIn("RAG prompt", " ".join(plan.steps))
+        self.assertEqual(plan.mode, WorkflowMode.AGENT)
+        self.assertEqual(plan.intent, "unified_request")
+        self.assertIn("检索", " ".join(plan.steps))
 
     def test_classify_change_request_as_agent(self):
         plan = classify_task("fix load_data encoding bug")
 
         self.assertEqual(plan.mode, WorkflowMode.AGENT)
-        self.assertEqual(plan.intent, "plan_and_act")
-        self.assertIn("ReAct", " ".join(plan.steps))
+        self.assertEqual(plan.intent, "unified_request")
+        self.assertIn("审批", " ".join(plan.steps))
 
-    def test_build_ask_messages_contains_context(self):
-        messages = build_ask_messages(
-            "Where is the function defined?",
-            "### [1] app.py:1-2\n```python\ndef run():\n    pass\n```",
-            GenerationMode.JUDGE,
-        )
-
-        self.assertEqual(messages[0]["role"], "system")
-        self.assertEqual(messages[1]["role"], "user")
-        self.assertIn("Where is the function defined?", messages[1]["content"])
-        self.assertIn("app.py:1-2", messages[1]["content"])
-
-    def test_run_ask_mode_retrieves_and_calls_client(self):
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            (root / "app.py").write_text(
-                "def load_data(path):\n    return path.read_text(encoding='utf-8')\n",
-                encoding="utf-8",
-            )
-            client = DummyClient()
-
-            run = run_ask_mode(
-                "Where does load_data read files?",
-                AskModeConfig(repo_path=root, top_k=1, recall_window=0),
-                client=client,
-            )
-
-        self.assertEqual(run.plan.mode, WorkflowMode.ASK)
-        self.assertTrue(run.final_results)
-        self.assertIn("load_data", client.messages[1]["content"])
-        self.assertIsNotNone(run.answer)
-        self.assertIn("Answer", run.answer or "")
+    def test_removed_ask_mode_is_not_accepted(self):
+        with self.assertRaises(ValueError):
+            classify_task("Where is the function?", requested_mode="ask")
 
     def test_react_compatibility_interface_is_plan_only(self):
         interface = ReActAgentInterface()

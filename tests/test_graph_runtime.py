@@ -245,6 +245,22 @@ class LangChainReadOnlyToolAdapterTest(unittest.TestCase):
             [("read_file", {"path": "app.py", "start_line": None, "end_line": None})],
         )
 
+    def test_trace_call_path_delegates_with_strict_arguments(self):
+        expected = {"path": "app.py", "symbol": "run", "edges": []}
+        executor = RecordingExecutor(result=expected)
+        tool = build_readonly_langchain_tool_map(executor)["trace_call_path"]
+
+        self.assertEqual(tool.invoke({"path": "app.py", "symbol": "run"}), expected)
+        self.assertEqual(
+            executor.calls,
+            [("trace_call_path", {"path": "app.py", "symbol": "run"})],
+        )
+        for arguments in ({"path": "app.py"}, {"path": "app.py", "symbol": "  "},
+                          {"path": "app.py", "symbol": "run", "extra": 1}):
+            with self.assertRaises(ValidationError):
+                tool.invoke(arguments)
+        self.assertEqual(len(executor.calls), 1)
+
 
 class LangChainAgentToolAdapterTest(unittest.TestCase):
     """验证普通 Agent 的完整工具集合和严格委托边界。"""
@@ -360,7 +376,7 @@ class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
         self.assertEqual(run.answer, "可以直接回答。")
         self.assertEqual(
             [tool.name for tool in model.bound_tools],
-            ["search_code", "read_file"],
+            ["search_code", "read_file", "trace_call_path"],
         )
         self.assertEqual(model.bind_kwargs, {"parallel_tool_calls": False})
         self.assertEqual(
@@ -428,6 +444,32 @@ class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
         self.assertIsInstance(model.calls[1][-1], ToolMessage)
         self.assertIn("不可信数据", str(model.calls[1][-1].content))
         self.assertNotIn("引用校验", run.answer)
+
+    def test_trace_call_path_round_trip_does_not_count_as_read_evidence(self):
+        executor = RecordingExecutor(result={
+            "path": "app.py",
+            "symbol": "entry",
+            "edges": [{"target_path": "helper.py", "target_start_line": 2}],
+        })
+        model = SequenceToolCallingModel([
+            tool_request("trace_call_path", {"path": "app.py", "symbol": "entry"}),
+            AIMessage(content="定义位于 helper.py:2-2。"),
+        ])
+
+        run = run_graph_query(
+            "追踪 entry 的调用",
+            UnifiedRunConfig(repo_path=".", max_steps=2),
+            model,
+            executor=executor,
+        )
+
+        self.assertEqual(run.status, "success")
+        self.assertEqual(executor.calls, [
+            ("trace_call_path", {"path": "app.py", "symbol": "entry"})
+        ])
+        self.assertIn("引用校验", run.answer)
+        self.assertEqual(run.trace["events"][1]["step"], "trace_call_path")
+        self.assertIsInstance(model.calls[1][-1], ToolMessage)
 
     def test_tool_argument_validation_becomes_partial_tool_observation(self):
         """无效工具参数不会进入执行器，并以 ToolMessage 反馈给模型。"""
@@ -613,8 +655,8 @@ class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
         self.assertIn("既没有给出回答", run.answer)
         self.assertEqual(run.trace["events"][0]["error"]["code"], "empty_model_answer")
 
-    def test_large_tool_output_is_compacted_before_model_context(self):
-        """超长工具输出被压缩，但原始可引用范围仍用于引用校验。"""
+    def test_large_tool_output_cannot_validate_unseen_source(self):
+        """A source range removed from the model observation cannot validate a citation."""
         large_text = "1: value = 1\n" + ("x" * 5000)
         executor = RecordingExecutor(
             result={
@@ -645,7 +687,40 @@ class LangGraphReadOnlyRuntimeTest(unittest.TestCase):
         self.assertEqual(run.status, "success")
         self.assertTrue(run.observations[0]["output_truncated"])
         self.assertLess(len(str(model.calls[1][-1].content)), len(large_text))
-        self.assertNotIn("引用校验", run.answer)
+        self.assertEqual(run.observations[0]["output"]["text"], "")
+        self.assertIn("无效引用: large.py:1-1", run.answer)
+
+    def test_truncated_search_citation_only_covers_complete_visible_lines(self):
+        from coding_rag.agent.runtime import collect_observed_ranges
+
+        ranges = []
+        collect_observed_ranges("search_code", {
+            "results": [{
+                "path": "app.py", "start_line": 10, "end_line": 12,
+                "text": "first line\nsecond par\n...[truncated 30 chars]",
+            }, {
+                "path": "hidden.py", "start_line": 1, "end_line": 2,
+            }],
+        }, ranges)
+        self.assertEqual(ranges, [("app.py", 10, 10)])
+
+    def test_search_metadata_without_code_body_is_not_citation_evidence(self):
+        executor = RecordingExecutor(result={"results": [{
+            "path": "hidden.py", "start_line": 1, "end_line": 1,
+            "text": "secret = '" + "x" * 3000 + "'",
+        }]})
+        model = SequenceToolCallingModel([
+            tool_request("search_code", {"query": "secret", "top_k": 1}),
+            AIMessage(content="见 hidden.py:1-1。"),
+        ])
+
+        run = run_graph_query(
+            "定位代码", UnifiedRunConfig(repo_path=".", max_context_chars=300, max_steps=2),
+            model, executor=executor,
+        )
+
+        self.assertNotIn("text", run.observations[0]["output"]["results"][0])
+        self.assertIn("无效引用: hidden.py:1-1", run.answer)
 
     def test_non_json_model_metadata_and_tool_values_are_normalized(self):
         """模型元数据和工具结果含特殊对象时，GraphState 仍可序列化。"""
